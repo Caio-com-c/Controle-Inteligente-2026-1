@@ -1,0 +1,1 @@
+# Controle-Inteligente-2026-1
