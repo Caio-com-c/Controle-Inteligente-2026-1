@@ -1,6 +1,7 @@
 import pandas as pd
 
 class Data:
+    #Caso já exista um banco de dados pré-existente 
     Caminho = r"C:\Users\joyce\OneDrive\Documentos\SCILAB\saida.csv"
     def __init__(self, arquivo_csv= Caminho):
         # Lê o arquivo CSV
