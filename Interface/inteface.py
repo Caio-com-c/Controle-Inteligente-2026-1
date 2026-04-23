@@ -4,8 +4,6 @@ from tkinter import messagebox
 import numpy as np
 import base64
 import control as ct
-from sympy import symbols, latex
-from sympy.physics.control import TransferFunction
 import matplotlib.pyplot as plt
 
 janela = Tk()
@@ -164,7 +162,7 @@ class Funcs():
         self.t_vazao.place(relx=0.01, rely=0.7)
 
         #função de transferencia 
-        s = symbols('s')
+        s = ct.tf('s')
         self.q_s = self.area_furo*np.sqrt(2*self.g*self.H0)
         self.R = self.H0/self.q_s
         self.G = (self.qe/self.area)/(s + (1/(self.area*self.R)))
