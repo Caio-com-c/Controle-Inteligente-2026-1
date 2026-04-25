@@ -51,8 +51,7 @@ class Core:
         gain = self.final_output / self.final_input
 
         # Cria a função de transferência de primeira ordem:
-        # G(s) = K / (tau*s + 1)
-        transfer_function = ctr.tf([gain], [self.tau, 1])
+        transfer_function = np.array([gain, self.tau])
 
         return transfer_function
 
