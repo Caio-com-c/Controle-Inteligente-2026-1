@@ -57,7 +57,7 @@ class Core:
         return transfer_function
 
     def addNoise(self, undisturbed, disturb=0):
-        # Gera ruído gaussiano (média 0, desvio 0.5)
+        # Gera ruído gaussiano
         noise = [random.gauss(0, disturb) for _ in undisturbed]
         # Adiciona ruído à saída original
         noisy_output = [y + n for y, n in zip(undisturbed, noise)]
