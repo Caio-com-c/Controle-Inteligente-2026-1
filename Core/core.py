@@ -1,5 +1,4 @@
 import numpy as np
-import control as ctr
 import random
 
 class Core:
