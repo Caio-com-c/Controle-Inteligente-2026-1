@@ -3,7 +3,6 @@ import numpy as np
 
 from core.core import Core
 
-
 class Controle:
     
     def __init__(self):
@@ -57,8 +56,15 @@ class Controle:
         # Simula a resposta para a entrada definida
         _, response = ctl.forced_response(closed_loop, T=self.time, U=input_reference)
 
+        # Calcula o erro do PID
+        self.pid_erro = response - input_reference
+        
         # Retorna a resposta controlada
         return response
+
+    def get_pid_erro(self):
+        # Retorna o erro do PID
+        return self.pid_erro
 
 
 
