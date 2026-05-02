@@ -1,14 +1,20 @@
 from tkinter import *
 from tkinter import ttk
+from tkinter import filedialog
 from tkinter import messagebox
 import numpy as np
 import base64
 import control as ct
 import matplotlib.pyplot as plt
+from data import Data
+from core import Core
+from plot import Plot
+from metrics import Metrics
 
 janela = Tk()
 
 class Funcs():
+
     def esconder_frames(self):
         for frame in self.janela.winfo_children():
             try:
@@ -20,6 +26,7 @@ class Funcs():
         self.frame_tela_intro.place_forget()
         self.frame_tela_dados = Frame(self.janela, bg="lightgrey")
         self.frame_tela_dados.place(width=1000, height=500)
+        self.tela_atual = self.frame_tela_dados
         self.lb_guia = Label(self.frame_tela_dados, text="Informação do tanque", bg="lightgrey", 
                              font=("Arial",20,"bold"))
         self.lb_guia.place(relx=0.38, rely=0.01)
@@ -30,22 +37,22 @@ class Funcs():
         #diametro do tanque
         self.t_d_a = Label(self.frame_tela_dados, text="Diâmetro do tanque [cm²]:", bg="lightgrey", 
                              font=("Arial",12,"bold"))
-        self.t_d_a.place(relx=0.01, rely=0.2)
+        self.t_d_a.place(relx=0.01, rely=0.1)
         self.d_a = Entry(self.frame_tela_dados, font=("Arial", 12))
-        self.d_a.place(relx=0.23,rely=0.2, width=100, height=30)
+        self.d_a.place(relx=0.23,rely=0.1, width=100, height=30)
         #diametro do furo
         self.t_d_f = Label(self.frame_tela_dados, text="Diâmetro do furo [cm²]:", bg="lightgrey", 
                              font=("Arial",12,"bold"))
-        self.t_d_f.place(relx=0.01, rely=0.28)
+        self.t_d_f.place(relx=0.01, rely=0.18)
         self.d_f = Entry(self.frame_tela_dados, font=("Arial", 12))
-        self.d_f.place(relx=0.23,rely=0.28, width=100, height=30)
+        self.d_f.place(relx=0.23,rely=0.18, width=100, height=30)
 
         #vazão de entrada
         self.t_q_e = Label(self.frame_tela_dados, text="Vazão de entrada [cm³/s]:", bg="lightgrey", 
                              font=("Arial",12,"bold"))
-        self.t_q_e.place(relx=0.01, rely=0.36)
+        self.t_q_e.place(relx=0.01, rely=0.26)
         self.q_e = Entry(self.frame_tela_dados, font=("Arial", 12))
-        self.q_e.place(relx=0.23,rely=0.36, width=100, height=30)
+        self.q_e.place(relx=0.23,rely=0.26, width=100, height=30)
 
         #calcular a função de transferencia 
         self.b_calcular = Button(self.frame_tela_dados, text="Calcular", font=("Arial", 12), command=self.calcular_ft)
@@ -56,17 +63,25 @@ class Funcs():
                 "* Vazão de entrada: 222 cm³/s"
         self.text_aux = Label(self.frame_tela_dados, text=text_1, bg="lightgrey", 
                              font=("Arial",12, "bold"), justify="left")
-        self.text_aux.place(relx=0.4, rely=0.2)
+        self.text_aux.place(relx=0.4, rely=0.1)
         self.condicao = IntVar()
         self.cond = Checkbutton(self.frame_tela_dados, text="Ativar valores padrões", variable=self.condicao, bg="lightgrey", 
                              font=("Arial",12,"bold"))
-        self.cond.place(relx =0.4, rely= 0.4)
+        self.cond.place(relx =0.4, rely= 0.3)
+
+        #escolher o arquivo para estimar a FT
+        self.cond_estimar = IntVar()
+        self.estimar = Checkbutton(self.frame_tela_dados, text="Estimar a FT por valores (u,y)", variable=self.cond_estimar, bg="lightgrey", 
+                             font=("Arial",12,"bold"))
+        self.estimar.place(relx =0.4, rely= 0.35)
+
         self.tanque(self.frame_tela_dados)
 
     def tela_simulacao(self):
         self.frame_tela_dados.place_forget()
         self.frame_tela_simu = Frame(self.janela, bg="lightgrey")
         self.frame_tela_simu.place(width=1000, height=500)
+        self.tela_atual = self.frame_tela_simu
         self.lb_guia = Label(self.frame_tela_simu, text="Ambiente de Simulação", bg="lightgrey", 
                              font=("Arial",20,"bold"))
         self.lb_guia.place(relx=0.36, rely=0.01)
@@ -74,10 +89,241 @@ class Funcs():
         self.botao_s = Button(self.frame_tela_simu, text= "Voltar", font=("Arial", 12), command=self.voltar_tela_inicial)
         self.botao_s.place(relx=0.88 , rely=0.93 , width=100, height=20)
 
+        self.tanque(self.frame_tela_simu)
+
+        self.btn_play = Button(self.frame_tela_simu, text="▶ Play", font=("Arial", 14, "bold"),command=None)
+        self.btn_play.place(relx = 0.38, rely = 0.1, width=100, height=50)
+
+        self.btn_pause = Button(self.frame_tela_simu, text="⏸ Pause", font=("Arial", 14, "bold"),command=None)
+        self.btn_pause.place(relx = 0.52, rely = 0.1, width=100, height=50)
+
+        self.t_setpoint = Label(self.frame_tela_simu, text="Setpoint (0 - 100)%:", bg="lightgrey", font=("Arial",12,"bold"))
+        self.t_setpoint.place(relx=0.01, rely=0.1)
+
+        self.setpoint = Entry(self.frame_tela_simu, font=("Arial", 12))
+        self.setpoint.place(relx=0.165,rely=0.095, width=100, height=30)
+
+        self.t_h = Label(self.frame_tela_simu, text=f"Altura(h) (0 - 100)%: {100}%", bg="lightgrey", font=("Arial",12,"bold"))
+        self.t_h.place(relx=0.01, rely=0.2)
+
+        self.tipo_controlador = StringVar(value="Nenhum")
+        
+        self.ta = Label(self.frame_tela_simu, text="Tipos de Controlador",bg="lightgrey", font=("Arial",12,"bold")) 
+        self.ta.place(relx=0.01, rely=0.28)
+
+        self.nenhum = Radiobutton(
+            self.frame_tela_simu, text="Nenhum",
+            variable=self.tipo_controlador, value="Nenhum",
+            bg="lightgrey", font=("Arial",12,"bold"),
+            command=self.atualizar_controlador
+        )
+        self.nenhum.place(relx =0.01, rely= 0.32)
+
+        self.PID = Radiobutton(
+            self.frame_tela_simu, text="PID",
+            variable=self.tipo_controlador, value="PID",
+            bg="lightgrey", font=("Arial",12,"bold"),
+            command=self.atualizar_controlador
+        )
+        self.PID.place(relx =0.01, rely= 0.4)
+
+        self.PID_ADA = Radiobutton(
+            self.frame_tela_simu, text="PID Adaptativo",
+            variable=self.tipo_controlador, value="PID Adaptativo",
+            bg="lightgrey", font=("Arial",12,"bold"),
+            command=self.atualizar_controlador
+        )
+        self.PID_ADA.place(relx =0.01, rely= 0.48)
+
+        self.t_Kp = Label(self.frame_tela_simu, text="Kp:", bg="lightgrey", font=("Arial",12,"bold"))
+        self.Kp = Entry(self.frame_tela_simu, font=("Arial", 12))
+
+        self.t_Ki = Label(self.frame_tela_simu, text="Ki:", bg="lightgrey", font=("Arial",12,"bold"))
+        self.Ki = Entry(self.frame_tela_simu, font=("Arial", 12))
+
+        self.t_Kd = Label(self.frame_tela_simu, text="Kd:", bg="lightgrey", font=("Arial",12,"bold"))
+        self.Kd = Entry(self.frame_tela_simu, font=("Arial", 12))
+
+        self.cond_ruido = IntVar()
+        self.cond_ruido_u = IntVar()
+        self.cond_ruido_y = IntVar()
+
+        self.ruido_u = Checkbutton(
+            self.frame_tela_simu,
+            text="U (Entrada)",
+            variable=self.cond_ruido_u,
+            bg="lightgrey",
+            font=("Arial",12,"bold"),
+            command=self.atualizar_ruido
+        )
+
+        self.ruido_y = Checkbutton(
+            self.frame_tela_simu,
+            text="Y (Saída)",
+            variable=self.cond_ruido_y,
+            bg="lightgrey",
+            font=("Arial",12,"bold"),
+            command=self.atualizar_ruido
+        )
+        self.t_ru = Label(self.frame_tela_simu, text="Grau (0 - 1):",
+                          bg="lightgrey", font=("Arial",12,"bold"))
+
+        self.grau_ruido_u = Entry(self.frame_tela_simu, font=("Arial", 12))
+
+        self.t_ry = Label(self.frame_tela_simu, text="Grau (0 - 1):",
+                          bg="lightgrey", font=("Arial",12,"bold"))
+
+        self.grau_ruido_y = Entry(self.frame_tela_simu, font=("Arial", 12))
+
+        self.ta = Label(self.frame_tela_simu, text="Configuração de Ruído e Filtro",bg="lightgrey", font=("Arial",12,"bold"))
+        self.ta.place(relx=0.01, rely=0.56)
+
+        self.ruido = Checkbutton(self.frame_tela_simu, text="Ruído", variable=self.cond_ruido, bg="lightgrey",font=("Arial",12,"bold"), command=self.atualizar_ruido)
+        self.ruido.place(relx = 0.01, rely= 0.62)
+
+        self.cond_filtro = IntVar()
+        self.cond_filtro_u = IntVar()
+        self.cond_filtro_y = IntVar()
+
+        self.filtro = Checkbutton(
+            self.frame_tela_simu,
+            text="Filtro",
+            variable=self.cond_filtro,
+            bg="lightgrey",
+            font=("Arial",12,"bold"),
+            command=self.atualizar_filtro
+        )
+        self.filtro.place(relx=0.01, rely=0.80)
+
+        self.filtro_u = Checkbutton(
+            self.frame_tela_simu,
+            text="U (Entrada)",
+            variable=self.cond_filtro_u,
+            bg="lightgrey",
+            font=("Arial",12,"bold"),
+            command=self.atualizar_filtro
+        )
+
+        self.filtro_y = Checkbutton(
+            self.frame_tela_simu,
+            text="Y (Saída)",
+            variable=self.cond_filtro_y,
+            bg="lightgrey",
+            font=("Arial",12,"bold"),
+            command=self.atualizar_filtro
+        )
+
+        self.t_fu = Label(self.frame_tela_simu, text="Grau (0 - 1):",
+                          bg="lightgrey", font=("Arial",12,"bold"))
+
+        self.grau_filtro_u = Entry(self.frame_tela_simu, font=("Arial", 12))
+
+        self.t_fy = Label(self.frame_tela_simu, text="Grau (0 - 1):",
+                          bg="lightgrey", font=("Arial",12,"bold"))
+
+        self.grau_filtro_y = Entry(self.frame_tela_simu, font=("Arial", 12))
+
+    def atualizar_ruido(self):
+
+        # Controle geral (liga/desliga tudo)
+        if self.cond_ruido.get() == 1:
+            self.ruido_u.place(relx=0.01, rely=0.67)
+            self.ruido_y.place(relx=0.01, rely=0.74)
+        else:
+            self.ruido_u.place_forget()
+            self.ruido_y.place_forget()
+
+            self.t_ru.place_forget()
+            self.grau_ruido_u.place_forget()
+            self.t_ry.place_forget()
+            self.grau_ruido_y.place_forget()
+            return  # importante parar aqui
+
+        # Ruído em U
+        if self.cond_ruido_u.get() == 1:
+            self.t_ru.place(relx=0.2, rely=0.66)
+            self.grau_ruido_u.place(relx=0.3, rely=0.66, width=100, height=30)
+        else:
+            self.t_ru.place_forget()
+            self.grau_ruido_u.place_forget()
+
+        # Ruído em Y
+        if self.cond_ruido_y.get() == 1:
+            self.t_ry.place(relx=0.2, rely=0.74)
+            self.grau_ruido_y.place(relx=0.3, rely=0.74, width=100, height=30)
+        else:
+            self.t_ry.place_forget()
+            self.grau_ruido_y.place_forget()
+
+    def atualizar_filtro(self):
+
+        # Liga/desliga o bloco todo
+        if self.cond_filtro.get() == 1:
+            self.filtro_u.place(relx=0.01, rely=0.84)
+            self.filtro_y.place(relx=0.01, rely=0.92)
+        else:
+            self.filtro_u.place_forget()
+            self.filtro_y.place_forget()
+
+            self.t_fu.place_forget()
+            self.grau_filtro_u.place_forget()
+            self.t_fy.place_forget()
+            self.grau_filtro_y.place_forget()
+            return
+
+        # Filtro em U
+        if self.cond_filtro_u.get() == 1:
+            self.t_fu.place(relx=0.2, rely=0.84)
+            self.grau_filtro_u.place(relx=0.3, rely=0.84, width=100, height=30)
+        else:
+            self.t_fu.place_forget()
+            self.grau_filtro_u.place_forget()
+
+        # Filtro em Y
+        if self.cond_filtro_y.get() == 1:
+            self.t_fy.place(relx=0.2, rely=0.92)
+            self.grau_filtro_y.place(relx=0.3, rely=0.92, width=100, height=30)
+        else:
+            self.t_fy.place_forget()
+            self.grau_filtro_y.place_forget()
+
+    def atualizar_controlador(self):
+
+        tipo = self.tipo_controlador.get()
+
+        # Primeiro esconde tudo
+        self.t_Kp.place_forget()
+        self.Kp.place_forget()
+        self.t_Ki.place_forget()
+        self.Ki.place_forget()
+        self.t_Kd.place_forget()
+        self.Kd.place_forget()
+
+        # Agora decide o que mostrar
+        match tipo:
+
+            case "Nenhum":
+                pass  # não mostra nada
+
+            case "PID":
+                self.t_Kp.place(relx=0.2, rely=0.32)
+                self.Kp.place(relx=0.24, rely=0.32, width=100, height=30)
+
+                self.t_Ki.place(relx=0.2, rely=0.4)
+                self.Ki.place(relx=0.24, rely=0.4, width=100, height=30)
+
+                self.t_Kd.place(relx=0.2, rely=0.48)
+                self.Kd.place(relx=0.24, rely=0.48, width=100, height=30)
+
+            case "PID Adaptativo":
+                # Aqui você pode depois adicionar campos específicos
+                pass
+
     def tela_intro(self):
         self.frame_tela_inicial.place_forget()
         self.frame_tela_intro = Frame(self.janela, bg="lightgrey")
         self.frame_tela_intro.place(width=1000, height=500) 
+        self.tela_atual = self.frame_tela_intro
         self.lb_guia = Label(self.frame_tela_intro, text="Introdução", bg="lightgrey", 
                              font=("Arial",20,"bold"))
         self.lb_guia.place(relx=0.43, rely=0.01)
@@ -129,59 +375,92 @@ class Funcs():
         self.line7 = self.canvas.create_line(260, 340, 260, 360, fill="black", width=3, arrow="last")
 
         #Cota H
-        self.text3 = self.canvas.create_text(60, 200, text="h", fill="black", font=("Arial", 16))
-        self.line8 = self.canvas.create_line(80, 50, 80, 350, fill="black", arrow="both", width=3)
-        self.text3 = self.canvas.create_text(150, 390, text="dt(⌀)", fill="black", font=("Arial", 16))
-        self.line9 = self.canvas.create_line(100, 370, 200, 370, fill="black", arrow="both", width=3)
-        self.text3 = self.canvas.create_text(305, 340, text="df(⌀)", fill="black", font=("Arial", 16))
-        self.line10 = self.canvas.create_line(280, 320, 280, 360, fill="black", arrow="both", width=3)
+        if not hasattr(self, "frame_tela_simu") or self.tela_atual != self.frame_tela_simu:
+            self.text3 = self.canvas.create_text(60, 200, text="h", fill="black", font=("Arial", 16))
+            self.line8 = self.canvas.create_line(80, 50, 80, 350, fill="black", arrow="both", width=3)
+            self.text3 = self.canvas.create_text(150, 390, text="dt(⌀)", fill="black", font=("Arial", 16))
+            self.line9 = self.canvas.create_line(100, 370, 200, 370, fill="black", arrow="both", width=3)
+            self.text3 = self.canvas.create_text(305, 340, text="df(⌀)", fill="black", font=("Arial", 16))
+            self.line10 = self.canvas.create_line(280, 320, 280, 360, fill="black", arrow="both", width=3)
 
     def calcular_ft(self):
-        if self.condicao.get() == 1:
+        if self.cond_estimar.get() == 1:
+            caminho_arquivo = filedialog.askopenfilename(
+                title="Selecione um arquivo",
+                filetypes=[("Arquivos de texto", "*.txt"), ("Comma-Separated Values", "*.csv*")]
+                )
+            self.dados = Data(arquivo_csv=caminho_arquivo)
+            self.estimacao = Core(self.dados)
+            self.g_estimada = self.estimacao.estimate()
+            self.g = self.estimacao.functionEstimated()
+            #função de transferencia 
+            s = ct.tf('s')
+            self.G = (self.g[0]/self.g[1])/(s + (1/self.g[1]))
+            texto = f"{(self.g[0]/self.g[1]):.4f}\n----------------\ns + {1/(self.g[1]):.4f}"
+            self.gs = Label(self.frame_tela_dados, text="Função de transferência\ndo sistema",font=("Arial", 16), bg="lightgrey")
+            self.gs.place(relx=0.44, rely=0.5)
+            self.gs = Label(self.frame_tela_dados, text="G(s) = ",font=("Arial", 18), bg="lightgrey")
+            self.gs.place(relx=0.4, rely=0.68)
+            self.label_ft = Label(self.frame_tela_dados, text=texto, font=("Arial", 18), bg="lightgrey")
+            self.label_ft.place(relx=0.49, rely=0.63)
+
+            if hasattr(self, "t_area"):
+                self.t_area.config(text="")
+
+            if hasattr(self, "t_vazao"):
+                self.t_vazao.config(text="")
+
+            if self.estimacao.tau > 0:
+                self.b_simular = Button(self.frame_tela_dados, text="Simular", font=("Arial", 12), command=self.tela_simulacao)
+                self.b_simular.place(relx= 0.62, rely=0.93, width=100, height=20)
+
+        if self.condicao.get() == 1 and self.cond_estimar.get() == 0:
             self.dt = 27
             self.df = 1
             self.qe = 222.2
             self.d_a.insert(0,"27")
             self.d_f.insert(0,"1")
             self.q_e.insert(0,"222.2")
-        else:
+        elif self.condicao.get() == 0 and self.cond_estimar.get() == 0:
             self.dt = float(self.d_a.get())
             self.df = float(self.d_f.get())
             self.qe = float(self.q_e.get())
-        self.area = (np.pi*(self.dt**2))/4            
-        self.area_furo = (np.pi*(self.df**2))/4 
-        self.g = float(981)
-        self.qs = self.area_furo*np.sqrt(2*self.g)
-        self.H0 = float((self.qe/self.qs)**2)
+        if self.cond_estimar.get() == 0:
+            self.area = (np.pi*(self.dt**2))/4            
+            self.area_furo = (np.pi*(self.df**2))/4 
+            self.g = float(981)
+            self.qs = self.area_furo*np.sqrt(2*self.g)
+            self.H0 = float((self.qe/self.qs)**2)
         
-        self.t_area = Label(self.frame_tela_dados, text = "* Área do tanque: {:.4f} cm² \n* Área do furo: {:.4f} cm²".format(self.area, self.area_furo),
+            self.t_area = Label(self.frame_tela_dados, text = "* Área do tanque: {:.4f} cm² \n* Área do furo: {:.4f} cm²".format(self.area, self.area_furo),
                             font=   ("Arial", 16), bg="lightgrey",justify="left")
-        self.t_area.place(relx=0.01, rely=0.6)
-        self.t_vazao = Label(self.frame_tela_dados, text = "* Vazão de Entrada: {:.4f} cm³/s \n* Ponto de Equilibrio: {:.4f} cm".format(self.qe, self.H0),
+            self.t_area.place(relx=0.01, rely=0.6)
+            self.t_vazao = Label(self.frame_tela_dados, text = "* Vazão de Entrada: {:.4f} cm³/s \n* Ponto de Equilibrio: {:.4f} cm".format(self.qe, self.H0),
                             font=   ("Arial", 16), bg="lightgrey",justify="left")
-        self.t_vazao.place(relx=0.01, rely=0.7)
+            self.t_vazao.place(relx=0.01, rely=0.7)
 
-        #função de transferencia 
-        s = ct.tf('s')
-        self.q_s = self.area_furo*np.sqrt(2*self.g*self.H0)
-        self.R = self.H0/self.q_s
-        self.G = (self.qe/self.area)/(s + (1/(self.area*self.R)))
-        texto = f"{self.qe/self.area:.2f}\n----------------\ns + {1/(self.area*self.R):.4f}"
-        self.gs = Label(self.frame_tela_dados, text="Função de transferência\ndo sistema",font=("Arial", 16), bg="lightgrey")
-        self.gs.place(relx=0.44, rely=0.5)
-        self.gs = Label(self.frame_tela_dados, text="G(s) = ",font=("Arial", 18), bg="lightgrey")
-        self.gs.place(relx=0.4, rely=0.68)
-        self.label_ft = Label(self.frame_tela_dados, text=texto, font=("Arial", 18), bg="lightgrey")
-        self.label_ft.place(relx=0.49, rely=0.63)
+            #função de transferencia 
+            s = ct.tf('s')
+            self.q_s = self.area_furo*np.sqrt(2*self.g*self.H0)
+            self.R = self.H0/self.q_s
+            self.G = (self.qe/self.area)/(s + (1/(self.area*self.R)))
+            texto = f"{self.qe/self.area:.4f}\n----------------\ns + {1/(self.area*self.R):.4f}"
+            self.gs = Label(self.frame_tela_dados, text="Função de transferência\ndo sistema",font=("Arial", 16), bg="lightgrey")
+            self.gs.place(relx=0.44, rely=0.5)
+            self.gs = Label(self.frame_tela_dados, text="G(s) = ",font=("Arial", 18), bg="lightgrey")
+            self.gs.place(relx=0.4, rely=0.68)
+            self.label_ft = Label(self.frame_tela_dados, text=texto, font=("Arial", 18), bg="lightgrey")
+            self.label_ft.place(relx=0.49, rely=0.63)
 
-        if self.R > 0:
-            self.b_simular = Button(self.frame_tela_dados, text="Simular", font=("Arial", 12), command=self.tela_simulacao)
-            self.b_simular.place(relx= 0.62, rely=0.93, width=100, height=20)
+            if self.R > 0:
+                self.b_simular = Button(self.frame_tela_dados, text="Simular", font=("Arial", 12), command=self.tela_simulacao)
+                self.b_simular.place(relx= 0.62, rely=0.93, width=100, height=20)
 
     def tela_sobre(self):
         self.frame_tela_inicial.place_forget()
         self.frame_tela_sobre = Frame(self.janela, bg="lightgrey")
         self.frame_tela_sobre.place(width=1000, height=500)
+        self.tela_atual = self.frame_tela_sobre
         self.lb_guia = Label(self.frame_tela_sobre, text="Sobre o Software", bg="lightgrey", 
                              font=("Arial",20,"bold"))
         self.lb_aut = Label(self.frame_tela_sobre, text= "Este aplicativo foi desenvolvido com o intuito de contribuir\npara professores e estudantes da disciplina de Controle Inteligente.\n\nBreno Rodrigues Macêdo - Discente de Eng. de Controle e Automação do IFPB\nCaio Henrique Vieira Alves - Discente de Eng. de Controle e Automação do IFPB\n Joyce Rufino de Sousa - Discente de Eng. de Controle e Automação do IFPB\n Raphaell Maciel de Sousa - Docente do IFPB", bg="lightgrey",
@@ -215,6 +494,7 @@ class App(Funcs):
         self.frame_tela_inicial = Frame(self.janela , bg="lightgrey")
         self.frame_tela_inicial.place(width=1000, height=500)
     def tela_inicial(self):
+        self.tela_atual = self.frame_tela_inicial
         self.lb_func = Label(self.frame_tela_inicial, text = "Controle Inteligente", bg="lightgrey"
                              , font=("Arial", 30))
         self.lb_func.place(relx=0.33, rely=0.2)
