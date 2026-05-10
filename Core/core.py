@@ -1,9 +1,11 @@
 import numpy as np
 import random
 
+from Data.data import Data
+
 class Core:
 
-    def __init__(self, Data):
+    def __init__(self, Data = Data()):
         # Inicializa as dependências
         self.data = Data
         
@@ -18,8 +20,6 @@ class Core:
         # Valores de regime permanente (último ponto)
         self.final_output = self.output[-1]           # Saída final
         self.final_input = self.input_signal[-1]      # Entrada final
-
-        print(self.tau)
 
 
     def estimate(self):
@@ -61,3 +61,24 @@ class Core:
         noisy_output = [y + n for y, n in zip(undisturbed, noise)]
         
         return noisy_output
+    
+    def set_LowpassFilter(self, dt, Tau_filter):
+        #a = exp(-Ts/Tau)
+        #y[k] = a*y[k-1] + (1-a)*x[k]
+        #dt  -> período de amostragem (s)
+        #Tau -> constante de tempo do filtro (s)
+        
+        self.dt = dt
+        self.Tau = Tau_filter
+
+        # Coeficiente do filtro
+        self.a = np.exp(-dt / Tau_filter)
+        self.b = 1.0 - self.a
+
+        # Estado interno
+        self.y = 0.0
+
+    def lowpassFilter(self, x):
+        # Esse filtro funciona em tempo real
+        self.y = self.a * self.y +  self.b * x
+        return self.y
