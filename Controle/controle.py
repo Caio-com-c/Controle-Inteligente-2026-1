@@ -16,7 +16,7 @@ class Controle:
         self.plant = None
         self.G = None
 
-    def pre_calc(self, intime, input_signal, output_signal):
+    def set_pid(self, intime, input_signal, output_signal):
         # Armazena o vetor de tempo
         self.time = intime
 
@@ -63,7 +63,7 @@ class Controle:
         # Retorna a resposta controlada
         return response
 
-    def set_pidzoh(self, Kp, Ki, Kd, N, Ts, umin=0.0, umax=255.0):
+    def set_pid_zoh(self, Kp, Ki, Kd, N, Ts, umin=0.0, umax=255.0):
         self.Kp = Kp
         self.Ki = Ki
         self.Kd = Kd
@@ -88,7 +88,7 @@ class Controle:
         self.e_prev = 0.0
         self.pid_zoh_erro = None
 
-    def pidzoh(self, setpoint, feedback):
+    def pid_zoh(self, setpoint, feedback):
         # O setpoint NÃO está em porcentagem
 
         # Erro
