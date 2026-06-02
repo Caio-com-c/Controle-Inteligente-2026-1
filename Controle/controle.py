@@ -129,6 +129,106 @@ class Controle:
         # O sinal de controle (u) varia de acordo com os limites de saturação
         return u
 
+def set_pid_autotune(self, Ts, d=13334, N=20.0, u=13334):
+        # Parâmetros
+        self.Ts = Ts
+        self.d = d
+        self.N = N
+
+        # Estado do autotune
+        self.tuning = True
+        self.t = 0.0
+
+        # Detecção de picos
+        self.y_max = -u
+        self.y_min = u
+        self.cross_times = []
+
+        # Sinal anterior do erro
+        self.sign_prev = 1
+
+    def pid_autotune(self, setpoint, feedback):
+        if self.tuning:
+            return self._autotune(setpoint, feedback)
+        else:
+            return self._pid(setpoint, feedback)
+
+    def _autotune(self, setpoint, y):
+        e = setpoint - y
+        self.t += self.Ts
+
+        # Atualiza máximos e mínimos
+        if y > self.y_max:
+            self.y_max = y
+        if y < self.y_min:
+            self.y_min = y
+
+        # Sinal do erro
+        sign = 1 if e >= 0 else -1
+
+        # Detecta cruzamento por zero
+        if sign != self.sign_prev:
+            self.cross_times.append(self.t)
+            self.sign_prev = sign
+
+        # Após 6 cruzamentos (3 ciclos), calcula os ganhos
+        if len(self.cross_times) >= 6:
+            self._calculate_gains()
+
+        # Saída do relé
+        return self.d if sign >= 0 else -self.d
+
+    # Calcula ganhos do PID
+    def _calculate_gains(self):
+        # Amplitude da oscilação
+        a = (self.y_max - self.y_min) / 2.0
+
+        # Período médio
+        periods = []
+        for i in range(2, len(self.cross_times)):
+            periods.append(self.cross_times[i] - self.cross_times[i - 2])
+
+        Pu = np.mean(periods)
+
+        # Ganho crítico
+        Ku = 4.0 * self.d / (np.pi * a)
+
+        # Ziegler-Nichols
+        self.Kp = 0.6 * Ku
+        self.Ki = 2.0 * self.Kp / Pu
+        self.Kd = self.Kp * Pu / 8.0
+
+        # Coeficientes do derivativo filtrado
+        self.ad = np.exp(-self.N * self.Ts)
+        self.bd = self.Kd * self.N * (1.0 - self.ad)
+
+        # Zera estados
+        self.I = 0.0
+        self.D = 0.0
+        self.e_prev = 0.0
+
+        # Entra em modo PID
+        self.tuning = False
+    
+    def _pid(self, setpoint, y):
+        e = setpoint - y
+
+        # Proporcional
+        P = self.Kp * e
+
+        # Integral
+        self.I += self.Ki * self.Ts * e
+
+        # Derivativo filtrado
+        de = e - self.e_prev
+        self.D = self.ad * self.D + self.bd * de
+
+        # Atualiza erro anterior
+        self.e_prev = e
+
+        # Saída do controlador
+        return P + self.I + self.D
+    
     def get_pid_erro(self):
         # Retorna o erro do PID
         return self.pid_erro
