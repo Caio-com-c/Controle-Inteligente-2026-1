@@ -129,7 +129,7 @@ class Controle:
         # O sinal de controle (u) varia de acordo com os limites de saturação
         return u
 
-def set_pid_autotune(self, Ts, d=13334, N=20.0, u=13334):
+    def set_pid_autotune(self, Ts, d=13334, N=20.0, u=13334):
         # Parâmetros
         self.Ts = Ts
         self.d = d
