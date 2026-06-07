@@ -63,88 +63,196 @@ class Controle:
         # Retorna a resposta controlada
         return response
 
-    def set_pid_zoh(self, Kp, Ki, Kd, N, Ts, umin=0.0, umax=255.0):
+    def set_pidzoh(self, Kp, Ki, Kd, N, Ts, umin=0.0, umax=255.0):
+        """
+        Configuração do controlador PID discreto com:
+            - Integral por aproximação retangular (ZOH)
+            - Derivativo filtrado
+    
+        Parâmetros:
+            Kp   -> ganho proporcional
+            Ki   -> ganho integral
+            Kd   -> ganho derivativo
+            N    -> frequência do filtro derivativo
+            Ts   -> período de amostragem (s)
+            umin -> limite inferior do sinal de controle
+            umax -> limite superior do sinal de controle
+        """
+    
+        # Ganhos do controlador
         self.Kp = Kp
         self.Ki = Ki
         self.Kd = Kd
+    
+        # Parâmetro do filtro derivativo
         self.N = N
+    
+        # Tempo entre duas execuções consecutivas do controlador
         self.Ts = Ts
-        
-        # Saturação da saída
-        # O umin e umax são os valor limite de saturação do sinal de controle (u)
-        # Pode usar os valores min/max da fonte ou min/max de funcionamento da planta
+    
+        # Limites físicos do atuador
+        # Exemplo:
+        # PWM Arduino: 0 a 255
+        # Tensão: 0 a 12 V
         self.umin = umin
         self.umax = umax
-
-        # Coeficientes do derivativo filtrado
-        # ad = e^(-N * Ts)
+        
         self.ad = np.exp(-N * Ts)
-        # bd = Kd * N * (1 - ad)
+    
+        # Ganho aplicado à diferença do erro
         self.bd = Kd * N * (1.0 - self.ad)
-
-        # Estados internos
+    
+        # ==================================================
+        # Estados internos do controlador
+        # ==================================================
+    
+        # Estado acumulado da ação integral
         self.integral = 0.0
+    
+        # Estado interno do filtro derivativo
         self.derivative = 0.0
+    
+        # Erro da amostra anterior
         self.e_prev = 0.0
+    
+        # Armazena o último erro calculado
         self.pid_zoh_erro = None
 
-    def pid_zoh(self, setpoint, feedback):
-        # O setpoint NÃO está em porcentagem
-
-        # Erro
+    def pidzoh(self, setpoint, feedback):
+        """
+        Executa uma iteração do PID discreto.
+    
+        Entradas:
+            setpoint -> valor desejado
+            feedback -> valor medido
+    
+        Saída:
+            u -> sinal de controle
+        """
+    
+        # ==================================================
+        # Cálculo do erro
+        # ==================================================
+        #
+        # erro = referência - medição
+        #
         pid_erro = setpoint - feedback
-
-        # Proporcional
-        # P[k] = Kp * pid_erro[k]
+    
+        # ==================================================
+        # Parcela Proporcional
+        # ==================================================
+        #
+        # P[k] = Kp * erro[k]
+        #
         proportional = self.Kp * pid_erro
-
-        # Integral (candidato)
-        # Ic[k] = I[k] + Ki * Ts * pid_erro[k]
-        integral_candidate = self.integral + self.Ki * self.Ts * pid_erro
-
-        # Erro derivativo
-        # derro[k] = pid_erro[k] - pid_erro[k-1]
+    
+        # ==================================================
+        # Parcela Integral
+        # ==================================================
+        #
+        # Aproximação discreta:
+        #
+        # I[k] = I[k-1] + Ki*Ts*erro[k]
+        #
+        # Ainda não atualizamos o estado real.
+        # Primeiro calculamos um candidato.
+        #
+        integral_candidate = (
+            self.integral +
+            self.Ki * self.Ts * pid_erro
+        )
+    
+        # ==================================================
+        # Diferença do erro
+        # ==================================================
+        #
+        # de[k] = erro[k] - erro[k-1]
+        #
         derro = pid_erro - self.e_prev
-
-        # Derivativo (candidato)
-        # Dc[k] = ad * D[k-1] + bd * derro[k] 
-        derivative_candidate = self.ad * self.derivative + self.bd * derro
-
-        # Saída não saturada
-        # u_unsat[k] = P[k] + Ic[k] + Dc[k]
-        u_unsat = proportional + integral_candidate + derivative_candidate
-
-        # Saturação
+    
+        # ==================================================
+        # Derivativo filtrado
+        # ==================================================
+        #
+        # D[k] = ad*D[k-1] + bd*de[k]
+        #
+        derivative_candidate = (
+            self.ad * self.derivative +
+            self.bd * derro
+        )
+    
+        # ==================================================
+        # Soma das ações de controle
+        # ==================================================
+        #
+        # u = P + I + D
+        #
+        u_unsat = (
+            proportional +
+            integral_candidate +
+            derivative_candidate
+        )
+    
+        # ==================================================
+        # Saturação do atuador
+        # ==================================================
+        #
+        # Garante que o sinal enviado para a planta
+        # permaneça dentro dos limites permitidos.
+        #
         u = max(self.umin, min(self.umax, u_unsat))
-
-        # Anti-windup simples:
-        # só aceita a integral se não houver saturação
+    
+        # ==================================================
+        # Anti-Windup
+        # ==================================================
+        #
+        # Se houve saturação, não atualizamos a integral.
+        #
+        # Isso evita que a integral continue crescendo
+        # enquanto o atuador está no limite.
+        #
         if u == u_unsat:
             self.integral = integral_candidate
-
-        # Atualiza estados
+    
+        # ==================================================
+        # Atualização dos estados
+        # ==================================================
         self.derivative = derivative_candidate
         self.e_prev = pid_erro
         self.pid_zoh_erro = pid_erro
-        # O sinal de controle (u) varia de acordo com os limites de saturação
+    
         return u
-
+    
     def set_pid_autotune(self, Ts, d=13334, N=20.0, u=13334):
-        # Parâmetros
+        """
+        Inicializa o autotune por relé
+        (Método de Åström-Hägglund).
+    
+        Ts -> período de amostragem
+        d  -> amplitude do relé
+        N  -> filtro derivativo futuro
+        u  -> valor máximo esperado da variável medida
+        """
+    
         self.Ts = Ts
         self.d = d
         self.N = N
-
-        # Estado do autotune
+    
+        # Indica que o controlador ainda está
+        # na fase de sintonia.
         self.tuning = True
+    
+        # Relógio interno
         self.t = 0.0
-
-        # Detecção de picos
+    
+        # Máximo e mínimo observados
         self.y_max = -u
         self.y_min = u
+    
+        # Armazena instantes dos cruzamentos
         self.cross_times = []
-
-        # Sinal anterior do erro
+    
+        # Sinal inicial do erro
         self.sign_prev = 1
 
     def pid_autotune(self, setpoint, feedback):
