@@ -203,9 +203,7 @@ class Plot(QWidget):
         self.setpoint = setpoint
 
     def update_signals(self):
-        """
-        Executa a iteração dinâmica em malha fechada entre o controlador e a planta.
-        """
+        #Executa a iteração dinâmica em malha fechada entre o controlador e a planta.
         if self.controle_obj is None or self.planta_obj is None:
             return
 
