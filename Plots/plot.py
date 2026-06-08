@@ -1,232 +1,288 @@
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
+import sys
 import numpy as np
-from scipy import signal as scipy_signal
-from Core.core import Core
-from Controle.controle import Controle
 
-plt.ion()
+from PyQt5.QtWidgets import (
+    QApplication,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton
+)
 
+from PyQt5.QtCore import QTimer
 
-class Plot(Controle):
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+from matplotlib.figure import Figure
+from controle import Controle
+from plant import Plant  
 
-    def __init__(self, parent_frame=None):
-        Controle.__init__(self)
-        self.parent_frame = parent_frame
-        self.noise_level = 0.05
-        self.filter_cutoff = 0.5
-        self.filter_order = 2
-        self.time = self.G = self.plant = self.core = None
+class Plot(QWidget):
 
-        self._fig = None
-        self._ax  = None
+    def __init__(self):
+        super().__init__()
 
-        plt.style.use('dark_background')
-        self.colors = {
-            'signal':     '#4A90D9',
-            'reference':  '#5DADE2',
-            'text':       '#85C1E9',
-            'grid':       '#1a2a3a',
-            'grid_major': '#1a3a5a',
-            'grid_minor': '#0a1a2a',
-        }
+        self.setWindowTitle("Osciloscópio")
+        self.resize(1000, 600)
 
-    # ── Setters ──────────────────────────────────────────────────────────────
+        # CONFIGURAÇÕES
 
-    def set_core_data(self, data_instance, G=None):
-        self.core = Core(data_instance)
-        self.time = data_instance.t()
+        self.janela_tempo = 10  # segundos
+        self.setpoint = 1.0     # Valor desejado padrão
 
-        if G is not None:
-            self.G = G
+        # Objetos do sistema (serão injetados externamente)
+        self.controle_obj = None
+        self.planta_obj = None
 
-        try:
-            # Garante que tau foi calculado
-            self.core.estimate()
+        # FIGURA
 
-            g = self.core.functionEstimated()  # [gain, tau]
+        self.fig = Figure(facecolor="#e9ecef")
+        self.canvas = FigureCanvasQTAgg(self.fig)
 
-            if g is not None:
-                ganho, tau = g
-                self.plant = np.array([ganho, tau])
+        self.ax = self.fig.add_subplot(111)
 
-                if self.G is None:
-                    import control as ct
-                    s = ct.tf('s')
-                    self.G = ganho / (tau*s + 1)
+        self.ax.set_facecolor("#f8f9fa")
 
-        except Exception:
-            pass
+        self.ax.grid(
+            True,
+            color="#d0d7de",
+            linewidth=0.8
+        )
 
-    def set_system_data(self, time, G, plant):
-        self.time, self.G, self.plant = time, G, plant
+        for spine in self.ax.spines.values():
+            spine.set_color("#adb5bd")
 
-    def set_parent_frame(self, frame):
-        self.parent_frame = frame
+        self.ax.tick_params(colors="#495057")
 
-    def set_noise_level(self, level):
-        try:
-            self.noise_level = max(0.0, min(1.0, float(level)))
-        except (TypeError, ValueError):
-            self.noise_level = 0.05
+        self.ax.set_title(
+            "Resposta do Sistema",
+            color="#212529"
+        )
 
-    def set_filter(self, cutoff=None, order=None):
-        if cutoff is not None:
-            self.filter_cutoff = max(0.01, min(1.0, float(cutoff)))
-        if order is not None:
-            self.filter_order = max(1, int(order))
+        self.ax.set_xlabel(
+            "Tempo (s)",
+            color="#343a40"
+        )
 
-    # ── Signal processing ────────────────────────────────────────────────────
+        self.ax.set_ylabel(
+            "Amplitude",
+            color="#343a40"
+        )
 
-    def _add_noise(self, sig, noise_on, noise_level=None):
-        if not noise_on:
-            return sig
-        level = noise_level if noise_level is not None else self.noise_level
-        return sig + np.random.normal(0, level, len(sig))
+        self.ax.set_xlim(0, self.janela_tempo)
+        self.ax.set_ylim(-1.5, 2.5) 
 
-    def _apply_filter(self, data, filter_on, cutoff=None, order=None):
-        if not filter_on or len(data) == 0 or self.time is None or len(self.time) < 2:
-            return data
-        fs = 1.0 / (self.time[1] - self.time[0])
-        normalized = min(0.99, (cutoff or self.filter_cutoff) / (fs / 2))
-        if not (0 < normalized < 1):
-            return data
-        b, a = scipy_signal.butter(order or self.filter_order, normalized, btype='low')
-        return scipy_signal.filtfilt(b, a, data)
+        # DADOS
+    
+        self.x_data = []
 
-    # ── Figura persistente ───────────────────────────────────────────────────
+        self.y_controle = []
+        self.y_planta = []
+        self.y_erro = []
 
-    def _get_fig_ax(self):
-        if self._fig is None or not plt.fignum_exists(self._fig.number):
-            self._fig = plt.figure("Simulação PID", figsize=(10, 5), facecolor='#0a0a1a')
-            self._ax  = self._fig.add_subplot(111)
-        return self._fig, self._ax
+        # LINHAS
 
-    # ── Estilo ───────────────────────────────────────────────────────────────
+        self.line_controle, = self.ax.plot(
+            [],
+            [],
+            color="#0d6efd",
+            linewidth=2,
+            label="Sinal de Controle"
+        )
 
-    def _setup_axes(self, ax):
-        ax.set_facecolor('#0a1428')
-        ax.tick_params(colors=self.colors['text'], which='both')
-        for spine in ax.spines.values():
-            spine.set_color(self.colors['grid'])
-        ax.grid(True, color=self.colors['grid_major'], linestyle='-', alpha=0.4, linewidth=0.8)
-        ax.grid(True, which='minor', color=self.colors['grid_minor'], linestyle='-', alpha=0.3, linewidth=0.5)
-        ax.minorticks_on()
+        self.line_planta, = self.ax.plot(
+            [],
+            [],
+            color="#dc3545",
+            linewidth=2,
+            label="Planta Controlada"
+        )
 
-    def _style_legend(self, ax):
-        legend = ax.legend(loc='best', facecolor='#0a1428',
-                           edgecolor=self.colors['text'], fontsize=10)
-        for text in legend.get_texts():
-            text.set_color(self.colors['text'])
+        self.line_erro, = self.ax.plot(
+            [],
+            [],
+            color="#198754",
+            linewidth=2,
+            label="Erro"
+        )
 
-    def _label_axes(self, ax, xlabel, ylabel, title):
-        ax.set_xlabel(xlabel, color=self.colors['text'], fontsize=11)
-        ax.set_ylabel(ylabel, color=self.colors['text'], fontsize=11)
-        ax.set_title(title,   color=self.colors['text'], fontsize=13, fontweight='bold')
+        self.ax.legend(frameon=False)
 
-    def _text_box(self, ax, x, y, text, color, ha='left'):
-        ax.text(x, y, text, transform=ax.transAxes, color=color, fontsize=9,
-                verticalalignment='top', horizontalalignment=ha,
-                bbox=dict(boxstyle='round', facecolor='#0a1428', alpha=0.8))
+        # BOTÕES
+  
+        self.bt_ch1 = QPushButton("CH1 - Sinal de Controle")
+        self.bt_ch2 = QPushButton("CH2 - Planta Controlada")
+        self.bt_ch3 = QPushButton("CH3 - Erro")
 
-    # ── Plot PID ─────────────────────────────────────────────────────────────
+        for bt in [self.bt_ch1, self.bt_ch2, self.bt_ch3]:
+            bt.setCheckable(True)
+            bt.setChecked(True)
 
-    def plot_response(self, set_point=1, kp=0, ki=0, kd=0,
-                      noise_on=False, filter_on=False,
-                      noise_level=None, filter_cutoff=None,
-                      title=None, linewidth=2):
+        self.bt_ch1.setStyleSheet("""
+            QPushButton {
+                background: #0d6efd;
+                color: white;
+                font-weight: bold;
+                padding: 8px;
+                border-radius: 5px;
+            }
+        """)
 
-        if self.time is None or self.G is None:
-            print("Erro: execute 'Calcular' antes de plotar.")
-            return None
+        self.bt_ch2.setStyleSheet("""
+            QPushButton {
+                background: #dc3545;
+                color: white;
+                font-weight: bold;
+                padding: 8px;
+                border-radius: 5px;
+            }
+        """)
 
-        try:
-            response = self.pid(set_point, kp, ki, kd)
-        except Exception as e:
-            print(f"Erro ao executar PID: {e}")
-            return None
+        self.bt_ch3.setStyleSheet("""
+            QPushButton {
+                background: #198754;
+                color: white;
+                font-weight: bold;
+                padding: 8px;
+                border-radius: 5px;
+            }
+        """)
 
-        if response is None:
-            return None
+        self.bt_ch1.clicked.connect(
+            lambda: self.toggle_channel(self.line_controle)
+        )
 
-        response = self._add_noise(response, noise_on, noise_level)
-        response = self._apply_filter(response, filter_on, filter_cutoff)
+        self.bt_ch2.clicked.connect(
+            lambda: self.toggle_channel(self.line_planta)
+        )
 
-        response_pct = response * 100
-        setpoint_pct = set_point * 100
+        self.bt_ch3.clicked.connect(
+            lambda: self.toggle_channel(self.line_erro)
+        )
 
-        fig, ax = self._get_fig_ax()
-        ax.cla()
-        fig.set_facecolor('#0a0a1a')
-        self._setup_axes(ax)
+        # LAYOUT
 
-        ax.plot(self.time, response_pct, self.colors['signal'],
-                linewidth=linewidth, label='Resposta do Sistema')
-        ax.fill_between(self.time, 0, response_pct, alpha=0.1, color=self.colors['signal'])
+        buttons_layout = QHBoxLayout()
 
-        ax.plot(self.time, np.full_like(self.time, setpoint_pct),
-                self.colors['reference'], linewidth=linewidth,
-                linestyle='--', label=f'Setpoint ({setpoint_pct:.0f}%)', alpha=0.9)
+        buttons_layout.addWidget(self.bt_ch1)
+        buttons_layout.addWidget(self.bt_ch2)
+        buttons_layout.addWidget(self.bt_ch3)
 
-        ax.set_ylim(0, 110)
-        ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f'{v:.0f}%'))
+        main_layout = QVBoxLayout()
 
-        if title is None:
-            title = f"PID: Kp={kp}, Ki={ki}, Kd={kd}"
-            if noise_on:
-                title += f" | Ruído: σ={noise_level or self.noise_level}"
-            if filter_on:
-                title += f" | Filtro: fc={filter_cutoff or self.filter_cutoff} Hz"
-            if not noise_on and not filter_on:
-                title += " | Sem Ruído/Filtro"
+        main_layout.addLayout(buttons_layout)
+        main_layout.addWidget(self.canvas)
 
-        self._label_axes(ax, 'Tempo (s)', 'Altura (%)', title)
-        self._style_legend(ax)
+        self.setLayout(main_layout)
 
-        if self.plant is not None:
-            self._text_box(ax, 0.02, 0.98,
-                           f"G(s) = {self.plant[0]:.3f} / ({self.plant[1]:.3f}s + 1)",
-                           self.colors['text'])
+        # TIMER
 
-        self._text_box(ax, 0.98, 0.98,
-                       f"Kp={kp}  Ki={ki}  Kd={kd}",
-                       self.colors['reference'], ha='right')
+        self.t = 0.0
+        self.dt = 0.05
+        self.controle_signal = 0.0
+        self.planta_signal = 0.0
+        self.erro_signal = 0.0
 
-        fig.tight_layout()
-        fig.canvas.draw()
-        fig.canvas.flush_events()
-        plt.show(block=False)
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_plot)
+        self.timer.start(int(self.dt * 1000))
 
-        return response_pct
+    def toggle_channel(self, line):
 
-    # ── Plot identificação ───────────────────────────────────────────────────
+        line.set_visible(
+            not line.get_visible()
+        )
 
-    def plot_identification(self, title="Identificação do Sistema", linewidth=2):
+        self.canvas.draw_idle()
 
-        if self.core is None or self.core.time is None or self.core.output is None:
-            print("Erro: Core não inicializado ou sem dados.")
+    def set_system_objects(self, controle_obj, planta_obj, setpoint=1.0):
+        
+        #Injeta os objetos configurados externamente e define o setpoint desejado.
+        
+        self.controle_obj = controle_obj
+        self.planta_obj = planta_obj
+        self.setpoint = setpoint
+
+    def update_signals(self):
+        """
+        Executa a iteração dinâmica em malha fechada entre o controlador e a planta.
+        """
+        if self.controle_obj is None or self.planta_obj is None:
             return
 
-        fig, ax = self._get_fig_ax()
-        ax.cla()
-        fig.set_facecolor('#0a0a1a')
-        self._setup_axes(ax)
+        # 1. Calcula o erro atual da malha (e = r - y)
+        self.erro_signal = self.setpoint - self.planta_signal
 
-        ax.plot(self.core.time, self.core.output, self.colors['signal'],
-                linewidth=linewidth, label='Saída Real')
+        # 2. Injeta o erro no controlador escolhido pelo usuário para obter o sinal 'u'
+        if hasattr(self.controle_obj, 'tuning'):
+            #print(f"[PLOT] Modo Ativo: AUTOTUNE | Executando: pid_autotune | Erro: {self.erro_signal:.4f}")
+            self.controle_signal = self.controle_obj.pid_autotune(self.setpoint, self.planta_signal)
+        else:
+            #print(f"[PLOT] Modo Ativo: PID ZOH   | Executando: pidzoh       | Erro: {self.erro_signal:.4f}")
+            self.controle_signal = self.controle_obj.pidzoh(self.setpoint, self.planta_signal)
 
-        ax.plot(self.core.time, self.core.estimate(), self.colors['reference'],
-                linewidth=linewidth, linestyle='--', label='Saída Estimada')
+        # 3. Alimenta a Planta de Primeira Ordem com o sinal de controle 'u'
+        self.planta_signal = self.planta_obj.order_one(self.controle_signal)
 
-        self._label_axes(ax, 'Tempo (s)', 'Saída', title)
-        self._style_legend(ax)
+    def update_plot(self):
 
-        if self.plant is not None:
-            self._text_box(ax, 0.02, 0.98,
-                           f"G(s) = {self.plant[0]:.3f} / ({self.plant[1]:.3f}s + 1)",
-                           self.colors['text'])
+        self.t += self.dt
 
-        fig.tight_layout()
-        fig.canvas.draw()
-        fig.canvas.flush_events()
-        plt.show(block=False)
+        # Calcula a iteração atual da malha dinâmica antes de atualizar a tela
+        self.update_signals()
+
+        # Captura os sinais gerados
+        controle = self.controle_signal
+        planta = self.planta_signal
+        erro = self.erro_signal
+
+        # Adiciona novos pontos
+        self.x_data.append(self.t)
+
+        self.y_controle.append(controle)
+        self.y_planta.append(planta)
+        self.y_erro.append(erro)
+
+        # Mantém apenas a janela desejada
+        while (
+            len(self.x_data) > 0 and
+            self.x_data[0] < self.t - self.janela_tempo
+        ):
+
+            self.x_data.pop(0)
+
+            self.y_controle.pop(0)
+            self.y_planta.pop(0)
+            self.y_erro.pop(0)
+
+        # Atualiza linhas
+        self.line_controle.set_data(
+            self.x_data,
+            self.y_controle
+        )
+
+        self.line_planta.set_data(
+            self.x_data,
+            self.y_planta
+        )
+
+        self.line_erro.set_data(
+            self.x_data,
+            self.y_erro
+        )
+
+        # Atualiza eixo do tempo
+        if self.t < self.janela_tempo:
+
+            self.ax.set_xlim(
+                0,
+                self.janela_tempo
+            )
+
+        else:
+
+            self.ax.set_xlim(
+                self.t - self.janela_tempo,
+                self.t
+            )
+
+        self.canvas.draw_idle()
