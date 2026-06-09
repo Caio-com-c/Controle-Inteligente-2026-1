@@ -201,6 +201,16 @@ class Plot(QWidget):
         self.controle_obj = controle_obj
         self.planta_obj = planta_obj
         self.setpoint = setpoint
+        
+        if setpoint > 0:
+            # Se o setpoint for positivo, dá uma folga para baixo e para cima
+            self.ax.set_ylim(-setpoint * 1, setpoint * 2.5)
+        elif setpoint < 0:
+            # Se o setpoint for negativo, ajusta a lógica dos limites
+            self.ax.set_ylim(setpoint * 1.5, -setpoint * 0.2)
+        else:
+            # Se for zero, mantém o padrão antigo
+            self.ax.set_ylim(-1.5, 2.5)
 
     def update_signals(self):
         #Executa a iteração dinâmica em malha fechada entre o controlador e a planta.
