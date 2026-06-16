@@ -14,7 +14,8 @@ from PyQt5.QtCore import QTimer
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from controle import Controle
-from plant import Plant  
+from plant import Plant 
+from core import Core 
 
 class Plot(QWidget):
 
@@ -32,6 +33,7 @@ class Plot(QWidget):
         # Objetos do sistema (serão injetados externamente)
         self.controle_obj = None
         self.planta_obj = None
+        self.core = Core()
 
         # FIGURA
 
@@ -194,13 +196,14 @@ class Plot(QWidget):
 
         self.canvas.draw_idle()
 
-    def set_system_objects(self, controle_obj, planta_obj, setpoint=1.0):
+    def set_system_objects(self, controle_obj, planta_obj, setpoint=1.0, noise=0):
         
         #Injeta os objetos configurados externamente e define o setpoint desejado.
         
         self.controle_obj = controle_obj
         self.planta_obj = planta_obj
         self.setpoint = setpoint
+        self.noise = noise
         
         if setpoint > 0:
             # Se o setpoint for positivo, dá uma folga para baixo e para cima
@@ -230,6 +233,8 @@ class Plot(QWidget):
 
         # 3. Alimenta a Planta de Primeira Ordem com o sinal de controle 'u'
         self.planta_signal = self.planta_obj.order_one(self.controle_signal)
+        self.planta_signal = self.core.addNoise(self.planta_signal,self.noise)
+        
 
     def update_plot(self):
 
@@ -251,10 +256,7 @@ class Plot(QWidget):
         self.y_erro.append(erro)
 
         # Mantém apenas a janela desejada
-        while (
-            len(self.x_data) > 0 and
-            self.x_data[0] < self.t - self.janela_tempo
-        ):
+        while (len(self.x_data) > 0 and self.x_data[0] < self.t - self.janela_tempo):
 
             self.x_data.pop(0)
 
