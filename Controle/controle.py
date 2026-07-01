@@ -344,3 +344,133 @@ class Controle:
     def get_pid_zoh_erro(self):
         # Retorna o erro do PID
         return self.pid_zoh_erro
+        
+    #class ControladorFuzzyPID:
+    def setControladorFuzzy(self, 
+            Ku=20, 
+            u_min=0, 
+            u_max=13350,
+            limites_erro=(-40, 40),
+            zm_erro=5,
+            limites_derro=(-20, 20),
+            zm_derro=2,
+            limites_dderro=(-10, 10),
+            zm_dderro=1,
+            limites_du=(-100, 100),
+            pico_du=10):
+        self.Ku = Ku
+        self.u_min = u_min
+        self.u_max = u_max
+        
+        # Sintonia do Erro (Componente Integral no acúmulo)
+        self.le_min, self.le_max = limites_erro
+        self.zm_e = zm_erro
+        
+        # Sintonia da Derivada do Erro (Componente Proporcional no acúmulo)
+        self.lde_min, self.lde_max = limites_derro
+        self.zm_de = zm_derro
+        
+        # Sintonia da Segunda Derivada do Erro (Componente Derivativo no acúmulo)
+        self.ldde_min, self.ldde_max = limites_dderro
+        self.zm_dde = zm_dderro
+        
+        # Sintonia da Saída (Incremento de controle)
+        self.ldu_min, self.ldu_max = limites_du
+        self.pico_du = pico_du
+        
+        # Variáveis de estado (Memória do Controlador)
+        self.u = 0.0
+        self.e_ant = 0.0
+        self.de_ant = 0.0 # Nova memória para calcular a aceleração
+        
+        # Constrói o cérebro Fuzzy PID de 27 Regras
+        self._construir_sistema()
+
+    def _construir_sistema(self):
+        # 1. Universos de Discurso Dinâmicos (3 Entradas e 1 Saída)
+        self.erro = ctrl.Antecedent(np.arange(self.le_min, self.le_max + 1, 1), 'erro')
+        self.derro = ctrl.Antecedent(np.arange(self.lde_min, self.lde_max + 1, 1), 'derro')
+        self.dderro = ctrl.Antecedent(np.arange(self.ldde_min, self.ldde_max + 1, 1), 'dderro')
+        self.du = ctrl.Consequent(np.arange(self.ldu_min, self.ldu_max + 1, 1), 'du')
+
+        # 2. Funções de Pertinência - Erro
+        self.erro['N'] = fuzz.trimf(self.erro.universe, [self.le_min, self.le_min, 0])
+        self.erro['Z'] = fuzz.trimf(self.erro.universe, [-self.zm_e, 0, self.zm_e])
+        self.erro['P'] = fuzz.trimf(self.erro.universe, [0, self.le_max, self.le_max])
+
+        # 3. Funções de Pertinência - Derivada do Erro
+        self.derro['N'] = fuzz.trimf(self.derro.universe, [self.lde_min, self.lde_min, 0])
+        self.derro['Z'] = fuzz.trimf(self.derro.universe, [-self.zm_de, 0, self.zm_de])
+        self.derro['P'] = fuzz.trimf(self.derro.universe, [0, self.lde_max, self.lde_max])
+
+        # 4. Funções de Pertinência - Segunda Derivada (Aceleração)
+        self.dderro['N'] = fuzz.trimf(self.dderro.universe, [self.ldde_min, self.ldde_min, 0])
+        self.dderro['Z'] = fuzz.trimf(self.dderro.universe, [-self.zm_dde, 0, self.zm_dde])
+        self.dderro['P'] = fuzz.trimf(self.dderro.universe, [0, self.ldde_max, self.ldde_max])
+
+        # 5. Funções de Saída Expandidas (5 conjuntos para suavidade do PID)
+        pico_grande = self.pico_du * 2
+        self.du['NB'] = fuzz.trimf(self.du.universe, [self.ldu_min, -pico_grande, -self.pico_du])
+        self.du['N']  = fuzz.trimf(self.du.universe, [-pico_grande, -self.pico_du, 0])
+        self.du['Z']  = fuzz.trimf(self.du.universe, [-self.pico_du, 0, self.pico_du])
+        self.du['P']  = fuzz.trimf(self.du.universe, [0, self.pico_du, pico_grande])
+        self.du['PB'] = fuzz.trimf(self.du.universe, [self.pico_du, pico_grande, self.ldu_max])
+
+        # 6. Geração Automática Combinatória de 27 Regras (Heurística de MacVicar-Whelan)
+        regras = []
+        termos = ['N', 'Z', 'P']
+        pesos = {'N': -1, 'Z': 0, 'P': 1}
+        
+        for t_e in termos:
+            for t_de in termos:
+                for t_dde in termos:
+                    # Soma a tendência das 3 entradas (Varia de -3 a +3)
+                    score = pesos[t_e] + pesos[t_de] + pesos[t_dde]
+                    
+                    # Mapeia a pontuação para a resposta proporcional correta da saída
+                    if score <= -2:   t_saida = 'NB'
+                    elif score == -1: t_saida = 'N'
+                    elif score == 0:  t_saida = 'Z'
+                    elif score == 1:  t_saida = 'P'
+                    else:             t_saida = 'PB' # score >= 2
+                        
+                    regra = ctrl.Rule(self.erro[t_e] & self.derro[t_de] & self.dderro[t_dde], self.du[t_saida])
+                    regras.append(regra)
+
+        sistema_ctrl = ctrl.ControlSystem(regras)
+        self.simulador = ctrl.ControlSystemSimulation(sistema_ctrl)
+
+    def ControladorFuzzy(self, setpoint, y_atual):
+        # Cálculos das variações temporais do erro
+        e = setpoint - y_atual
+        de = e - self.e_ant
+        dde = de - self.de_ant # Diferença das velocidades = Aceleração
+
+        # Clips de segurança para os universos
+        e = np.clip(e, self.le_min, self.le_max)
+        de = np.clip(de, self.lde_min, self.lde_max)
+        dde = np.clip(dde, self.ldde_min, self.ldde_max)
+
+        # Processamento Fuzzy
+        self.simulador.input['erro'] = e
+        self.simulador.input['derro'] = de
+        self.simulador.input['dderro'] = dde
+        
+        self.simulador.compute()
+        du_fuzzy = self.simulador.output['du']
+        
+        # Ação acumulativa (Integração)
+        self.u += self.Ku * du_fuzzy
+        self.u = np.clip(self.u, self.u_min, self.u_max)
+        
+        # Atualização dos estados anteriores
+        self.e_ant = e
+        self.de_ant = de
+
+        return self.u
+
+    def resetar(self):
+        """Limpa todo o histórico de estados."""
+        self.u = 0.0
+        self.e_ant = 0.0
+        self.de_ant = 0.0
