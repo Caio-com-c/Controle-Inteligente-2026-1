@@ -1,6 +1,6 @@
 import control as ctl
 import numpy as np
-import skfuzzy as fuzz
+import skfuzzy as fuzz    #scikit-fuzzy
 from skfuzzy import control as ctl
 
 from Core.core import Core
