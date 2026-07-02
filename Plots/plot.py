@@ -228,7 +228,7 @@ class Plot(QWidget):
 
     def set_setpoint(self, novo_setpoint, ajustar_escala=True):
         
-        # Atualiza o setpoint em tempo real, SEM reiniciar a simulação
+        # Atualiza o setpoint em tempo real, sem reiniciar a simulação
         # Pode ser chamado a qualquer momento, de fora da classe
         
         self.setpoint = novo_setpoint
@@ -247,7 +247,7 @@ class Plot(QWidget):
             self.ax.set_ylim(-1.5, 2.5)
 
     def set_controller(self, novo_controle_obj):
-        # Troca o controlador ativo em tempo real, SEM reiniciar a simulação
+        # Troca o controlador ativo em tempo real, sem reiniciar a simulação
         self.controle_obj = novo_controle_obj
 
     def set_noise(self, novo_noise):
