@@ -219,16 +219,18 @@ class Plot(QWidget):
 
     def set_system_objects(self, controle_obj, planta_obj, setpoint=1.0, noise=0):
 
-        # Injeta os objetos configurados externamente e define o setpoint inicial.
+        # Injeta os objetos configurados externamente e define setpoint
         self.controle_obj = controle_obj
         self.planta_obj = planta_obj
-        self.noise = noise
+
         self.set_setpoint(setpoint)
+        self.set_noise(noise)
 
     def set_setpoint(self, novo_setpoint, ajustar_escala=True):
-        # Atualiza o setpoint em tempo real, sem reiniciar a simulação.
-
-        # Pode ser chamado a qualquer momento, de fora da classe 
+        
+        # Atualiza o setpoint em tempo real, SEM reiniciar a simulação
+        # Pode ser chamado a qualquer momento, de fora da classe
+        
         self.setpoint = novo_setpoint
 
         if not ajustar_escala:
@@ -243,23 +245,24 @@ class Plot(QWidget):
         else:
             # Se for zero, mantém o padrão antigo
             self.ax.set_ylim(-1.5, 2.5)
-            
-    def set_controller(self, novo_controle_obj):
-        # Troca o controlador ativo em tempo real, SEM reiniciar a simulação.
 
+    def set_controller(self, novo_controle_obj):
+        # Troca o controlador ativo em tempo real, SEM reiniciar a simulação
         self.controle_obj = novo_controle_obj
 
+    def set_noise(self, novo_noise):
+        # Troca o nível de ruído aplicado à planta em tempo real, sem reiniciar a simulação
+        self.noise = novo_noise
+
     def update_signals(self):
-        # Executa a iteração dinâmica em malha fechada entre o controlador e a planta.
+        # Executa a iteração dinâmica em malha fechada entre o controlador e a planta
         if self.controle_obj is None or self.planta_obj is None:
             return
 
         # 1. Calcula o erro atual da malha (e = r - y)
-        
         self.erro_signal = self.setpoint - self.planta_signal
 
         # 2. Injeta as leituras no método correspondente do controlador ativo
-    
         if hasattr(self.controle_obj, 'simulador'):
             # Se o controlador foi configurado em modo Fuzzy, executa-o
             self.controle_signal = self.controle_obj.ControladorFuzzy(self.setpoint, self.planta_signal)
@@ -277,8 +280,7 @@ class Plot(QWidget):
         self.planta_signal = self.core.addNoise(self.planta_signal, self.noise)
 
     def update_plot(self):
-        
-        # Chamada a cada "tick" do QTimer.
+        # Chamada a cada "tick" do QTimer
         self.t += self.dt
 
         # Calcula a iteração atual da malha dinâmica antes de atualizar a tela
@@ -287,7 +289,7 @@ class Plot(QWidget):
         # Adiciona o novo ponto de tempo
         self.x_data.append(self.t)
 
-        # Alimenta o buffer de cada canal com o valor atual do seu sinal.
+        # Alimenta o buffer de CADA canal com o valor atual do sinal
         for ch in self.channels:
             ch["buffer"].append(ch["getter"]())
 
@@ -297,7 +299,6 @@ class Plot(QWidget):
             (i for i, x in enumerate(self.x_data) if x >= limite),
             len(self.x_data)
         )
-
         if corte > 0:
             self.x_data = self.x_data[corte:]
             for ch in self.channels:
