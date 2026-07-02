@@ -14,8 +14,9 @@ from PyQt5.QtCore import QTimer
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from controle import Controle
-from plant import Plant 
-from core import Core 
+from plant import Plant
+from core import Core
+
 
 class Plot(QWidget):
 
@@ -71,10 +72,10 @@ class Plot(QWidget):
         )
 
         self.ax.set_xlim(0, self.janela_tempo)
-        self.ax.set_ylim(-1.5, 2.5) 
+        self.ax.set_ylim(-1.5, 2.5)
 
         # DADOS
-    
+
         self.x_data = []
 
         self.y_controle = []
@@ -109,8 +110,28 @@ class Plot(QWidget):
 
         self.ax.legend(frameon=False)
 
+        # CANAIS
+        
+        self.channels = [
+            {
+                "line": self.line_controle,
+                "buffer": self.y_controle,
+                "getter": lambda: self.controle_signal,
+            },
+            {
+                "line": self.line_planta,
+                "buffer": self.y_planta,
+                "getter": lambda: self.planta_signal,
+            },
+            {
+                "line": self.line_erro,
+                "buffer": self.y_erro,
+                "getter": lambda: self.erro_signal,
+            },
+        ]
+
         # BOTÕES
-  
+
         self.bt_ch1 = QPushButton("CH1 - Sinal de Controle")
         self.bt_ch2 = QPushButton("CH2 - Planta Controlada")
         self.bt_ch3 = QPushButton("CH3 - Erro")
@@ -197,102 +218,93 @@ class Plot(QWidget):
         self.canvas.draw_idle()
 
     def set_system_objects(self, controle_obj, planta_obj, setpoint=1.0, noise=0):
-        
-        #Injeta os objetos configurados externamente e define o setpoint desejado.
-        
+
+        # Injeta os objetos configurados externamente e define o setpoint inicial.
         self.controle_obj = controle_obj
         self.planta_obj = planta_obj
-        self.setpoint = setpoint
         self.noise = noise
-        
-        if setpoint > 0:
+        self.set_setpoint(setpoint)
+
+    def set_setpoint(self, novo_setpoint, ajustar_escala=True):
+        # Atualiza o setpoint em tempo real, sem reiniciar a simulação.
+
+        # Pode ser chamado a qualquer momento, de fora da classe 
+        self.setpoint = novo_setpoint
+
+        if not ajustar_escala:
+            return
+
+        if novo_setpoint > 0:
             # Se o setpoint for positivo, dá uma folga para baixo e para cima
-            self.ax.set_ylim(-setpoint * 1, setpoint * 2.5)
-        elif setpoint < 0:
+            self.ax.set_ylim(-novo_setpoint * 1, novo_setpoint * 2.5)
+        elif novo_setpoint < 0:
             # Se o setpoint for negativo, ajusta a lógica dos limites
-            self.ax.set_ylim(setpoint * 1.5, -setpoint * 0.2)
+            self.ax.set_ylim(novo_setpoint * 1.5, -novo_setpoint * 0.2)
         else:
             # Se for zero, mantém o padrão antigo
             self.ax.set_ylim(-1.5, 2.5)
 
     def update_signals(self):
-        #Executa a iteração dinâmica em malha fechada entre o controlador e a planta.
+        # Executa a iteração dinâmica em malha fechada entre o controlador e a planta.
         if self.controle_obj is None or self.planta_obj is None:
             return
 
         # 1. Calcula o erro atual da malha (e = r - y)
+        
         self.erro_signal = self.setpoint - self.planta_signal
 
-        # 2. Injeta o erro no controlador escolhido pelo usuário para obter o sinal 'u'
-        if hasattr(self.controle_obj, 'tuning'):
-            #print(f"[PLOT] Modo Ativo: AUTOTUNE | Executando: pid_autotune | Erro: {self.erro_signal:.4f}")
+        # 2. Injeta as leituras no método correspondente do controlador ativo
+    
+        if hasattr(self.controle_obj, 'simulador'):
+            # Se o controlador foi configurado em modo Fuzzy, executa-o
+            self.controle_signal = self.controle_obj.ControladorFuzzy(self.setpoint, self.planta_signal)
+
+        elif hasattr(self.controle_obj, 'tuning'):
+            # Se possuir a tag 'tuning', roda o Autotune por Relé
             self.controle_signal = self.controle_obj.pid_autotune(self.setpoint, self.planta_signal)
+
         else:
-            #print(f"[PLOT] Modo Ativo: PID ZOH   | Executando: pidzoh       | Erro: {self.erro_signal:.4f}")
+            # Caso contrário, assume o PID ZOH tradicional
             self.controle_signal = self.controle_obj.pidzoh(self.setpoint, self.planta_signal)
 
         # 3. Alimenta a Planta de Primeira Ordem com o sinal de controle 'u'
         self.planta_signal = self.planta_obj.order_one(self.controle_signal)
-        self.planta_signal = self.core.addNoise(self.planta_signal,self.noise)
-        
+        self.planta_signal = self.core.addNoise(self.planta_signal, self.noise)
 
     def update_plot(self):
-
+        # Chamada a cada "tick" do QTimer.
         self.t += self.dt
 
         # Calcula a iteração atual da malha dinâmica antes de atualizar a tela
         self.update_signals()
 
-        # Captura os sinais gerados
-        controle = self.controle_signal
-        planta = self.planta_signal
-        erro = self.erro_signal
-
-        # Adiciona novos pontos
+        # Adiciona o novo ponto de tempo
         self.x_data.append(self.t)
 
-        self.y_controle.append(controle)
-        self.y_planta.append(planta)
-        self.y_erro.append(erro)
+        # Alimenta o buffer de cada canal com o valor atual do seu sinal.
+        for ch in self.channels:
+            ch["buffer"].append(ch["getter"]())
 
-        # Mantém apenas a janela desejada
-        while (len(self.x_data) > 0 and self.x_data[0] < self.t - self.janela_tempo):
-
-            self.x_data.pop(0)
-
-            self.y_controle.pop(0)
-            self.y_planta.pop(0)
-            self.y_erro.pop(0)
-
-        # Atualiza linhas
-        self.line_controle.set_data(
-            self.x_data,
-            self.y_controle
+        # Corte da janela de tempo
+        limite = self.t - self.janela_tempo
+        corte = next(
+            (i for i, x in enumerate(self.x_data) if x >= limite),
+            len(self.x_data)
         )
 
-        self.line_planta.set_data(
-            self.x_data,
-            self.y_planta
-        )
+        if corte > 0:
+            self.x_data = self.x_data[corte:]
+            for ch in self.channels:
+                del ch["buffer"][:corte]
 
-        self.line_erro.set_data(
-            self.x_data,
-            self.y_erro
-        )
+        # Atualiza cada linha com seus dados já processados
+        for ch in self.channels:
+            ch["line"].set_data(self.x_data, ch["buffer"])
 
         # Atualiza eixo do tempo
-        if self.t < self.janela_tempo:
-
-            self.ax.set_xlim(
-                0,
-                self.janela_tempo
-            )
-
-        else:
-
-            self.ax.set_xlim(
-                self.t - self.janela_tempo,
-                self.t
-            )
+        self.ax.set_xlim(
+            max(0, self.t - self.janela_tempo),
+            max(self.t, self.janela_tempo)
+        )
 
         self.canvas.draw_idle()
