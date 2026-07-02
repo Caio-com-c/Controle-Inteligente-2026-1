@@ -1,5 +1,7 @@
 import control as ctl
 import numpy as np
+import skfuzzy as fuzz
+from skfuzzy import control as ctl
 
 from Core.core import Core
 from Data.data import Data
@@ -388,10 +390,10 @@ class Controle:
 
     def _construir_sistema(self):
         # 1. Universos de Discurso Dinâmicos (3 Entradas e 1 Saída)
-        self.erro = ctrl.Antecedent(np.arange(self.le_min, self.le_max + 1, 1), 'erro')
-        self.derro = ctrl.Antecedent(np.arange(self.lde_min, self.lde_max + 1, 1), 'derro')
-        self.dderro = ctrl.Antecedent(np.arange(self.ldde_min, self.ldde_max + 1, 1), 'dderro')
-        self.du = ctrl.Consequent(np.arange(self.ldu_min, self.ldu_max + 1, 1), 'du')
+        self.erro = ctl.Antecedent(np.arange(self.le_min, self.le_max + 1, 1), 'erro')
+        self.derro = ctl.Antecedent(np.arange(self.lde_min, self.lde_max + 1, 1), 'derro')
+        self.dderro = ctl.Antecedent(np.arange(self.ldde_min, self.ldde_max + 1, 1), 'dderro')
+        self.du = ctl.Consequent(np.arange(self.ldu_min, self.ldu_max + 1, 1), 'du')
 
         # 2. Funções de Pertinência - Erro
         self.erro['N'] = fuzz.trimf(self.erro.universe, [self.le_min, self.le_min, 0])
@@ -434,11 +436,11 @@ class Controle:
                     elif score == 1:  t_saida = 'P'
                     else:             t_saida = 'PB' # score >= 2
                         
-                    regra = ctrl.Rule(self.erro[t_e] & self.derro[t_de] & self.dderro[t_dde], self.du[t_saida])
+                    regra = ctl.Rule(self.erro[t_e] & self.derro[t_de] & self.dderro[t_dde], self.du[t_saida])
                     regras.append(regra)
 
-        sistema_ctrl = ctrl.ControlSystem(regras)
-        self.simulador = ctrl.ControlSystemSimulation(sistema_ctrl)
+        sistema_ctl = ctl.ControlSystem(regras)
+        self.simulador = ctl.ControlSystemSimulation(sistema_ctl)
 
     def ControladorFuzzy(self, setpoint, y_atual):
         # Cálculos das variações temporais do erro
