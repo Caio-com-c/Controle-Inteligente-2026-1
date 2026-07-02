@@ -243,6 +243,11 @@ class Plot(QWidget):
         else:
             # Se for zero, mantém o padrão antigo
             self.ax.set_ylim(-1.5, 2.5)
+            
+    def set_controller(self, novo_controle_obj):
+        # Troca o controlador ativo em tempo real, SEM reiniciar a simulação.
+
+        self.controle_obj = novo_controle_obj
 
     def update_signals(self):
         # Executa a iteração dinâmica em malha fechada entre o controlador e a planta.
@@ -272,6 +277,7 @@ class Plot(QWidget):
         self.planta_signal = self.core.addNoise(self.planta_signal, self.noise)
 
     def update_plot(self):
+        
         # Chamada a cada "tick" do QTimer.
         self.t += self.dt
 
