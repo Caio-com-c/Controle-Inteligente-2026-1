@@ -55,3 +55,21 @@ for i in range(passos):
 
     # 3. A Rede Neural aprende com o erro e ajusta suas sinapses
     controlador_nn.backpropagation(erro, dy_du=planta.b_one, learn_ratio=taxa_aprendizado)
+
+plt.style.use('dark_background')
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+
+ax1.plot(historico_tempo, historico_valor, color='cyan', label='Saída (Y)')
+ax1.plot(historico_tempo, plant_h, color='blue', label='Planta (Y)')
+ax1.axhline(setpoint, color='red', linestyle='--', label='Setpoint')
+ax1.set_title('Planta controlada por Rede Neural')
+ax1.legend()
+ax1.grid(True, alpha=0.3)
+
+ax2.plot(historico_tempo, historico_controle, color='magenta', label='Sinal de Controle (U) gerado pela NN')
+ax2.set_xlabel('Tempo (s)')
+ax2.legend()
+ax2.grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
