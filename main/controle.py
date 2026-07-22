@@ -3,6 +3,9 @@ import threading
 import queue
 import numpy as np
 
+from fuzzy_controller  import FuzzyController
+from neural_controller import NeuroController
+
 
 class Control:
     """
@@ -14,6 +17,8 @@ class Control:
     "onoff"        — liga/desliga com histerese configurável
     "pid"          — PID discreto posicional com anti-windup
     "pid_adaptive" — PID com ganhos variáveis por zona de erro
+    "fuzzy"        — Mamdani incremental (erro + Δe → ΔQe)
+    "neural"       — MLP online com backpropagation a cada passo
 
     Ruído (distúrbio de sensor)
     ---------------------------
@@ -42,6 +47,7 @@ class Control:
     u_ctrl     — sinal de controle antes da saturação
     Kp/Ki/Kd   — ganhos ativos
     mode       — modo ativo
+    dy_du      — sensibilidade estimada da planta (neural)
     """
 
     def __init__(
@@ -102,6 +108,16 @@ class Control:
         self._gains_mid  = (5.0,  0.10, 1.0)
         self._gains_far  = (10.0, 0.05, 2.0)
 
+        # Fuzzy (Mamdani incremental)
+        # ΔQe calculado pelo fuzzy é somado à Qe atual (controle incremental)
+        self._fuzzy    = FuzzyController(Qe_max=Qe_nominal)
+        self._Qe_fuzzy = 0.0    # Qe acumulada do fuzzy (integrador)
+        self._e_prev_fuzzy = 0.0  # erro anterior para calcular Δe
+
+        # Neural (MLP online)
+        self._neural   = NeuroController(Qe_max=Qe_nominal)
+        self._neural_learn_rate = 0.01   # configurável via set_neural_params
+
         # ---- Ruído -------------------------------------------------- #
         self._ruido_h  = False   # distúrbio no sensor de nível
         self._ruido_Qe = False   # distúrbio no sensor de vazão
@@ -139,6 +155,10 @@ class Control:
             self._e_prev   = 0.0
             self._h_filt   = float(h0)
             self._Qe_filt  = self._Qe_fixed
+            # Reseta estado dos novos controladores
+            self._Qe_fuzzy        = 0.0
+            self._e_prev_fuzzy    = 0.0
+            self._neural.reset()
         self._running = True
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
@@ -173,11 +193,15 @@ class Control:
             self._e_prev   = 0.0
 
     def set_mode(self, mode: str) -> None:
-        """'none' | 'onoff' | 'pid' | 'pid_adaptive'"""
+        """'none' | 'onoff' | 'pid' | 'pid_adaptive' | 'fuzzy' | 'neural'"""
         with self._lock:
-            self._mode     = mode
-            self._integral = 0.0
-            self._e_prev   = 0.0
+            self._mode            = mode
+            self._integral        = 0.0
+            self._e_prev          = 0.0
+            self._Qe_fuzzy        = 0.0
+            self._e_prev_fuzzy    = 0.0
+            if mode == "neural":
+                self._neural.reset()
 
     def set_pid_gains(self, Kp: float, Ki: float, Kd: float) -> None:
         with self._lock:
@@ -201,6 +225,27 @@ class Control:
             self._gains_near = tuple(gains_near)
             self._gains_mid  = tuple(gains_mid)
             self._gains_far  = tuple(gains_far)
+
+    def set_neural_params(self, learn_rate: float = 0.01,
+                          hidden_size: int | None = None) -> None:
+        """
+        Ajusta hiperparâmetros da rede neural.
+        Se hidden_size for fornecido, recria a rede (reseta os pesos).
+
+        Parâmetros
+        ----------
+        learn_rate  : taxa de aprendizado η
+        hidden_size : número de neurônios na camada oculta (opcional)
+        """
+        with self._lock:
+            self._neural_learn_rate    = float(learn_rate)
+            self._neural.learn_rate    = float(learn_rate)
+            if hidden_size is not None:
+                self._neural = NeuroController(
+                    Qe_max=self.Qe_nominal,
+                    hidden_size=int(hidden_size),
+                    learn_rate=float(learn_rate),
+                )
 
     # ------------------------------------------------------------------ #
     #  Setters — ruído                                                    #
@@ -281,10 +326,14 @@ class Control:
                 alpha_Qe  = self._alpha_Qe
                 h_filt    = self._h_filt
                 Qe_filt   = self._Qe_filt
+                # Fuzzy / Neural
+                Qe_fuzzy       = self._Qe_fuzzy
+                e_prev_fuzzy   = self._e_prev_fuzzy
 
             # --- Controlador usa h REAL (sem ruído) ------------------ #
             u_ctrl = 0.0
             active_Kp, active_Ki, active_Kd = Kp, Ki, Kd
+            dy_du_pub = self._neural._dy_du   # para publicar no state
 
             if mode == "none":
                 Qe = Qe_fixed
@@ -301,7 +350,39 @@ class Control:
                 Qe     = Qe_max if onoff_ligado else Qe_min
                 u_ctrl = Qe
 
+            elif mode == "fuzzy":
+                # Erro em % de H_max
+                e_pct      = ((setpoint - h) / self.H_max) * 100.0
+                delta_e_pct = e_pct - ((e_prev_fuzzy / self.H_max) * 100.0
+                                        if self.H_max else 0.0)
+                e          = setpoint - h
+
+                # ΔQe calculado pelo fuzzy
+                dQe        = self._fuzzy.compute(e_pct, delta_e_pct)
+
+                # Integrador: Qe[k] = Qe[k-1] + ΔQe
+                Qe_fuzzy   = float(np.clip(Qe_fuzzy + dQe, Qe_min, Qe_max))
+                Qe         = Qe_fuzzy
+                u_ctrl     = dQe     # sinal incremental publicado
+
+            elif mode == "neural":
+                e        = setpoint - h
+                e_pct    = (e / self.H_max) * 100.0
+
+                # Atualiza estimativa dy/du com estado do passo anterior
+                self._neural.update_sensitivity(h, self._neural._Qe_prev)
+
+                # Forward: calcula Qe
+                Qe       = self._neural.forward(e_pct)
+                u_ctrl   = Qe
+                dy_du_pub = self._neural._dy_du
+
+                # Backprop: aprende online
+                self._neural.backprop(e_pct)
+                self._neural._Qe_prev = Qe
+
             else:
+                # PID e PID Adaptativo
                 e = setpoint - h
 
                 if mode == "pid_adaptive":
@@ -357,6 +438,8 @@ class Control:
                 self._e_prev   = e
                 self._h_filt   = h_filt
                 self._Qe_filt  = Qe_filt
+                self._Qe_fuzzy      = Qe_fuzzy
+                self._e_prev_fuzzy  = e
 
             # --- Publica --------------------------------------------- #
             sp_pct    = (setpoint / self.H_max) * 100.0
@@ -365,8 +448,8 @@ class Control:
 
             state = {
                 "sim_time":  self._sim_time,
-                "h_raw":     (h_next / self.H_max) * 100.0,  # sem ruído/filtro
-                "h_pct":     h_obs_pct,                       # com ruído/filtro
+                "h_raw":     (h_next / self.H_max) * 100.0,
+                "h_pct":     h_obs_pct,
                 "sp_pct":    sp_pct,
                 "error_pct": error_pct,
                 "Qe_raw":    Qe,
@@ -377,6 +460,7 @@ class Control:
                 "Ki":        active_Ki,
                 "Kd":        active_Kd,
                 "mode":      mode,
+                "dy_du":     dy_du_pub,   # sensibilidade estimada (neural)
             }
 
             try:

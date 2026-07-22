@@ -6,9 +6,13 @@ import base64
 import control as ct
 from data import Data
 from core import Core
-from plot import Plot
+from plot import PlotSignals
 from metrics import Metrics
 from controle import Control   # simulação em tempo real
+
+from dados import Dados
+
+
 
 import matplotlib
 matplotlib.use("TkAgg")
@@ -22,6 +26,126 @@ GRAPH_WINDOW = 120
 
 
 class Funcs():
+
+    def _voltar_metricas(self):
+
+        self.frame_metricas.place_forget()
+
+        self.tela_simulacao()
+
+    def _abrir_metricas(self):
+    
+        # Não pode abrir com a simulação rodando
+        if self.ctrl.is_running:
+            messagebox.showwarning(
+                "Simulação em execução",
+                "Pause a simulação antes de visualizar as métricas."
+            )
+            return
+    
+        # Ainda não existe nenhuma simulação
+        if len(self.sim_data.t) == 0:
+            messagebox.showwarning(
+                "Nenhuma simulação",
+                "Execute uma simulação antes de visualizar as métricas."
+            )
+            return
+    
+        # Fecha o plot, se estiver aberto
+        if hasattr(self, "plot_window"):
+            try:
+                self.plot_window.window.destroy()
+            except:
+                pass
+            
+            del self.plot_window
+    
+        self.tela_metricas()
+    
+    def tela_metricas(self):
+
+        self.frame_tela_simu.place_forget()
+
+        self.frame_metricas = Frame(
+            self.janela,
+            bg="lightgrey"
+        )
+
+        self.frame_metricas.place(
+            width=1000,
+            height=500
+        )
+
+        self.tela_atual = self.frame_metricas
+
+        metric = Metrics(
+            self.sim_data.t,
+            self.sim_data.control,
+            self.sim_data.y,
+            self.sim_data.u
+        )
+        Button(
+            self.frame_metricas,
+            text="Voltar",
+            font=("Arial",12),
+            command=self._voltar_metricas
+        ).place(
+            relx=0.88,
+            rely=0.93,
+            width=100,
+            height=20
+        )
+
+        dados = metric.resumo()
+
+        Label(
+            self.frame_metricas,
+            text="Resultados da Simulação",
+            font=("Arial",20,"bold"),
+            bg="lightgrey"
+        ).place(relx=0.34,rely=0.03)
+
+        y = 0.12
+
+        for nome, valor in dados.items():
+        
+            if isinstance(valor, float):
+                texto = f"{valor:.3f}"
+            else:
+                texto = str(valor)
+
+            Label(
+                self.frame_metricas,
+                text=nome,
+                bg="lightgrey",
+                anchor="w",
+                font=("Arial",12,"bold")
+            ).place(
+                relx=0.08,
+                rely=y
+            )
+
+            Label(
+                self.frame_metricas,
+                text=texto,
+                bg="white",
+                relief="sunken",
+                anchor="center",
+                font=("Arial",12)
+            ).place(
+                relx=0.45,
+                rely=y,
+                width=180
+            )
+
+            y += 0.055
+
+    def abrir_plot(self):
+
+        if (not hasattr(self, "plot_window")
+                or not self.plot_window.window.winfo_exists()):
+
+            self.plot_window = PlotSignals(self)
 
     def _validar_e_configurar(self, reiniciar=True):
 
@@ -288,6 +412,7 @@ class Funcs():
         self.frame_tela_simu = Frame(self.janela, bg="lightgrey")
         self.frame_tela_simu.place(width=1000, height=500)
         self.tela_atual = self.frame_tela_simu
+        self.sim_data.clear()
 
         Label(self.frame_tela_simu, text="Ambiente de Simulação",
               bg="lightgrey", font=("Arial", 20, "bold")).place(relx=0.36, rely=0.01)
@@ -315,6 +440,34 @@ class Funcs():
             command=self._on_enviar
         ).place(
             relx=0.75,
+            rely=0.93,
+            width=100,
+            height=20
+        )
+
+        self.btn_plot = Button(
+            self.frame_tela_simu,
+            text="Plot",
+            font=("Arial", 12),
+            command=self.abrir_plot
+        )
+        
+        self.btn_plot.place(
+            relx=0.62,
+            rely=0.93,
+            width=100,
+            height=20  
+        )
+
+        self.btn_metrics = Button(
+            self.frame_tela_simu,
+            text="Métricas",
+            font=("Arial",12),
+            command=self._abrir_metricas
+        )
+
+        self.btn_metrics.place(
+            relx=0.49,
             rely=0.93,
             width=100,
             height=20
@@ -485,6 +638,10 @@ class Funcs():
         self._hist_t = []
         self._hist_h = []
         self._hist_sp = []
+        self._hist_u = []          # setpoint
+        self._hist_y = []          # saída
+        self._hist_control = []    # sinal de controle
+        self._hist_error = []      # erro
 
 
     # ================================================================== #
@@ -546,7 +703,30 @@ class Funcs():
             state['h_pct'],
             state['sp_pct'])
 
-        self.janela.after(100, self._poll)
+            # if hasattr(self, "plot_window"):
+            
+            #     self.plot_window.add_sample(
+            #         state["sim_time"],
+            #         state["sp_pct"],
+            #         state["h_pct"],
+            #         state["u_ctrl"],
+            #         state["error_pct"]
+            #     )
+
+            self.sim_data.add(state)
+
+            if hasattr(self, "plot_window"):
+                self.plot_window.add_sample(
+                    state["sim_time"],
+                    state["sp_pct"],
+                    state["h_pct"],
+                    state["u_ctrl"],
+                    state["error_pct"]
+                )
+
+                self.plot_window.update_plot()
+
+        self.janela.after(200, self._poll)
 
 
     # ================================================================== #
@@ -931,10 +1111,12 @@ class App(Funcs):
         self.ctrl: Control | None = None
         self.H_max  = 100.0    # provisório; sobrescrito em _criar_control
         self.qe     = 0.0      # vazão de entrada; definida em calcular_ft
+        self.sim_data = Dados()
         self.window()
         self.frames()
         self.tela_inicial()
         janela.mainloop()
+
 
     def window(self):
         self.janela.title("Controle Inteligente")
