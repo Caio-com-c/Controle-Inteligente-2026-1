@@ -8,21 +8,16 @@ from data import Data
 from core import Core
 from plot import PlotSignals
 from metrics import Metrics
-from controle import Control   # simulação em tempo real
-
+from controle import Control  
 from dados import Dados
-
-
-
 import matplotlib
-matplotlib.use("TkAgg")
-
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 
 janela = Tk()
 GRAPH_WINDOW = 120
+matplotlib.use("TkAgg")
 
 
 class Funcs():
@@ -148,108 +143,89 @@ class Funcs():
             self.plot_window = PlotSignals(self)
 
     def _validar_e_configurar(self, reiniciar=True):
-
-        # ── Setpoint ──────────────────────────────
+ 
+        # ── Setpoint ──────────────────────────────────────────────────
         try:
             sp_pct = float(self.setpoint.get())
-
             if not (0 <= sp_pct <= 100):
                 raise ValueError
-
         except ValueError:
-            messagebox.showerror(
-                "Erro",
-                "Setpoint deve ser entre 0 e 100."
-            )
+            messagebox.showerror("Erro", "Setpoint deve ser entre 0 e 100.")
             return False
-
-        # ── Modo ──────────────────────────────────
+ 
+        # ── Modo ──────────────────────────────────────────────────────
         mapa = {
-            "Nenhum": "none",
-            "ON/OFF": "onoff",
-            "PID": "pid",
+            "Nenhum":         "none",
+            "ON/OFF":         "onoff",
+            "PID":            "pid",
             "PID Adaptativo": "pid_adaptive",
+            "Fuzzy":          "fuzzy",
+            "Neural":         "neural",
         }
-
         modo = mapa[self.tipo_controlador.get()]
-
+ 
         self.ctrl.set_mode(modo)
-
         self.ctrl.set_setpoint(sp_pct)
-
-        # ── ON/OFF ────────────────────────────────
+ 
+        # ── ON/OFF ────────────────────────────────────────────────────
         if modo == "onoff":
-
             try:
                 hist = float(self.histerese.get())
-            except:
+            except Exception:
                 hist = 2.0
-
             self.ctrl.set_onoff_histerese(hist)
-
-        # ── PID ───────────────────────────────────
+ 
+        # ── PID ───────────────────────────────────────────────────────
         elif modo == "pid":
-
             try:
                 Kp = float(self.Kp.get())
                 Ki = float(self.Ki.get())
                 Kd = float(self.Kd.get())
-
-            except:
-                messagebox.showerror(
-                    "Erro",
-                    "Kp, Ki e Kd inválidos."
-                )
+            except Exception:
+                messagebox.showerror("Erro", "Kp, Ki e Kd inválidos.")
                 return False
-
-            self.ctrl.set_pid_gains(
-                Kp,
-                Ki,
-                Kd
-            )
-
-        # ── Sem controlador ───────────────────────
+            self.ctrl.set_pid_gains(Kp, Ki, Kd)
+ 
+        # ── Neural ────────────────────────────────────────────────────
+        elif modo == "neural":
+            try:
+                lr = float(self.lr.get())
+            except Exception:
+                lr = 0.01
+            self.ctrl.set_neural_params(learn_rate=lr)
+ 
+        # ── Sem controlador ───────────────────────────────────────────
         if modo == "none":
             self.ctrl.set_Qe_fixed(self.qe)
-
-        # ── Ruído ─────────────────────────────────
+ 
+        # ── Ruído ─────────────────────────────────────────────────────
         self.ctrl.set_ruido(
-
             h=bool(self.cond_ruido_h.get()),
-
-            Qe=bool(self.cond_ruido_Qe.get())
+            Qe=bool(self.cond_ruido_Qe.get()),
         )
-
-        # ── Filtro ────────────────────────────────
-
-        filt_h = bool(self.cond_filtro_h.get())
+ 
+        # ── Filtro ────────────────────────────────────────────────────
+        filt_h  = bool(self.cond_filtro_h.get())
         filt_Qe = bool(self.cond_filtro_Qe.get())
-
         try:
             a_h = float(self.alpha_h.get())
-        except:
+        except Exception:
             a_h = 0.3
-
         try:
             a_Qe = float(self.alpha_Qe.get())
-        except:
+        except Exception:
             a_Qe = 0.3
-
-        self.ctrl.set_filtro(
-            h=filt_h,
-            Qe=filt_Qe,
-            alpha_h=a_h,
-            alpha_Qe=a_Qe
-        )
-
+ 
+        self.ctrl.set_filtro(h=filt_h, Qe=filt_Qe,
+                             alpha_h=a_h, alpha_Qe=a_Qe)
+ 
+        # ── Reinicia simulação e históricos ───────────────────────────
         if reiniciar:
-
             self._hist_t.clear()
             self._hist_h.clear()
             self._hist_sp.clear()
-
             self.ctrl.start(h0=0.0)
-
+ 
         return True
 
     def _criar_grafico(self):
@@ -412,52 +388,21 @@ class Funcs():
         self.frame_tela_simu = Frame(self.janela, bg="lightgrey")
         self.frame_tela_simu.place(width=1000, height=500)
         self.tela_atual = self.frame_tela_simu
-        self.sim_data.clear()
-
+ 
         Label(self.frame_tela_simu, text="Ambiente de Simulação",
               bg="lightgrey", font=("Arial", 20, "bold")).place(relx=0.36, rely=0.01)
-
+ 
+        # ── Rodapé: Voltar | Enviar | Plot ────────────────────────────
         Button(self.frame_tela_simu, text="Voltar", font=("Arial", 12),
                command=self._on_voltar_simulacao).place(relx=0.88, rely=0.93,
                                                         width=100, height=20)
-
-        self.tanque(self.frame_tela_simu)
-        self._criar_grafico()
-
-        # ── Play / Pause ──────────────────────────────────────────────
-        self.btn_play = Button(self.frame_tela_simu, text="▶ Play",
-                               font=("Arial", 14, "bold"), command=self._on_play)
-        self.btn_play.place(relx=0.38, rely=0.08, width=100, height=40)
-
-        self.btn_pause = Button(self.frame_tela_simu, text="⏸ Pause",
-                                font=("Arial", 14, "bold"), command=self._on_pause)
-        self.btn_pause.place(relx=0.52, rely=0.08, width=100, height=40)
-
-        self.btn_enviar = Button(
-            self.frame_tela_simu,
-            text="Enviar",
-            font=("Arial", 12),
-            command=self._on_enviar
-        ).place(
-            relx=0.75,
-            rely=0.93,
-            width=100,
-            height=20
-        )
-
-        self.btn_plot = Button(
-            self.frame_tela_simu,
-            text="Plot",
-            font=("Arial", 12),
-            command=self.abrir_plot
-        )
-        
-        self.btn_plot.place(
-            relx=0.62,
-            rely=0.93,
-            width=100,
-            height=20  
-        )
+        Button(self.frame_tela_simu, text="Enviar", font=("Arial", 12),
+               command=self._on_enviar).place(relx=0.75, rely=0.93,
+                                              width=100, height=20)
+        # ── NOVO: botão Plot ──────────────────────────────────────────
+        Button(self.frame_tela_simu, text="Plot", font=("Arial", 12),
+               command=self.abrir_plot).place(relx=0.62, rely=0.93,
+                                            width=100, height=20)
 
         self.btn_metrics = Button(
             self.frame_tela_simu,
@@ -472,165 +417,148 @@ class Funcs():
             width=100,
             height=20
         )
+ 
+        self.tanque(self.frame_tela_simu)
+        self._criar_grafico()
 
+ 
+        # ── Play / Pause ──────────────────────────────────────────────
+        self.btn_play = Button(self.frame_tela_simu, text="▶ Play",
+                               font=("Arial", 14, "bold"), command=self._on_play)
+        self.btn_play.place(relx=0.38, rely=0.08, width=100, height=40)
+ 
+        self.btn_pause = Button(self.frame_tela_simu, text="⏸ Pause",
+                                font=("Arial", 14, "bold"), command=self._on_pause)
+        self.btn_pause.place(relx=0.52, rely=0.08, width=100, height=40)
+ 
         # ── Setpoint ──────────────────────────────────────────────────
         Label(self.frame_tela_simu, text="Setpoint (0-100)%:",
               bg="lightgrey", font=("Arial", 12, "bold")).place(relx=0.01, rely=0.10)
         self.setpoint = Entry(self.frame_tela_simu, font=("Arial", 12))
         self.setpoint.place(relx=0.165, rely=0.10, width=80, height=26)
-
+ 
         # ── Indicadores em tempo real ─────────────────────────────────
         self.t_h = Label(self.frame_tela_simu, text="h: --.--%",
                          bg="lightgrey", font=("Arial", 12, "bold"))
         self.t_h.place(relx=0.01, rely=0.19)
-
+ 
         self.t_sp = Label(self.frame_tela_simu, text="SP: --.--%",
                           bg="lightgrey", font=("Arial", 12, "bold"))
         self.t_sp.place(relx=0.16, rely=0.19)
-
+ 
         self.t_erro = Label(self.frame_tela_simu, text="Erro: --.--%",
                             bg="lightgrey", font=("Arial", 12, "bold"))
         self.t_erro.place(relx=0.31, rely=0.19)
-
+ 
         self.t_tempo = Label(self.frame_tela_simu, text="t: 0.0 s",
                              bg="lightgrey", font=("Arial", 11))
         self.t_tempo.place(relx=0.01, rely=0.26)
-
+ 
         self.t_qe = Label(self.frame_tela_simu, text="Qe: -- cm³/s",
                           bg="lightgrey", font=("Arial", 11))
         self.t_qe.place(relx=0.16, rely=0.26)
-
+ 
         self.t_qs = Label(self.frame_tela_simu, text="Qs: -- cm³/s",
                           bg="lightgrey", font=("Arial", 11))
         self.t_qs.place(relx=0.31, rely=0.26)
-
+ 
         # ── Tipo de controlador ───────────────────────────────────────
         self.tipo_controlador = StringVar(value="Nenhum")
-
+ 
         Label(self.frame_tela_simu, text="Tipos de Controlador",
               bg="lightgrey", font=("Arial", 12, "bold")).place(relx=0.01, rely=0.33)
-
+ 
         Radiobutton(self.frame_tela_simu, text="Nenhum",
                     variable=self.tipo_controlador, value="Nenhum",
                     bg="lightgrey", font=("Arial", 12, "bold"),
                     command=self.atualizar_controlador).place(relx=0.01, rely=0.38)
-
+ 
         Radiobutton(self.frame_tela_simu, text="ON/OFF",
                     variable=self.tipo_controlador, value="ON/OFF",
                     bg="lightgrey", font=("Arial", 12, "bold"),
                     command=self.atualizar_controlador).place(relx=0.01, rely=0.44)
-
+ 
         Radiobutton(self.frame_tela_simu, text="PID",
                     variable=self.tipo_controlador, value="PID",
                     bg="lightgrey", font=("Arial", 12, "bold"),
                     command=self.atualizar_controlador).place(relx=0.01, rely=0.50)
-
+ 
         Radiobutton(self.frame_tela_simu, text="PID Adaptativo",
                     variable=self.tipo_controlador, value="PID Adaptativo",
                     bg="lightgrey", font=("Arial", 12, "bold"),
                     command=self.atualizar_controlador).place(relx=0.01, rely=0.56)
-
+ 
+        Radiobutton(self.frame_tela_simu, text="Fuzzy",
+                    variable=self.tipo_controlador, value="Fuzzy",
+                    bg="lightgrey", font=("Arial", 12, "bold"),
+                    command=self.atualizar_controlador).place(relx=0.01, rely=0.62)
+ 
+        Radiobutton(self.frame_tela_simu, text="Neural",
+                    variable=self.tipo_controlador, value="Neural",
+                    bg="lightgrey", font=("Arial", 12, "bold"),
+                    command=self.atualizar_controlador).place(relx=0.01, rely=0.68)
+ 
         # Campos ON/OFF
         self.t_histerese = Label(self.frame_tela_simu, text="Histerese (%):",
                                  bg="lightgrey", font=("Arial", 12, "bold"))
         self.histerese = Entry(self.frame_tela_simu, font=("Arial", 12))
-
+ 
         # Campos PID
         self.t_Kp = Label(self.frame_tela_simu, text="Kp:",
                           bg="lightgrey", font=("Arial", 12, "bold"))
         self.Kp = Entry(self.frame_tela_simu, font=("Arial", 12))
-
         self.t_Ki = Label(self.frame_tela_simu, text="Ki:",
                           bg="lightgrey", font=("Arial", 12, "bold"))
         self.Ki = Entry(self.frame_tela_simu, font=("Arial", 12))
-
         self.t_Kd = Label(self.frame_tela_simu, text="Kd:",
                           bg="lightgrey", font=("Arial", 12, "bold"))
         self.Kd = Entry(self.frame_tela_simu, font=("Arial", 12))
-
-        # ── Ruído e Filtro ───────────────────────────────────────────
-
-        Label(
-            self.frame_tela_simu,
-            text="Ruído (sensor):",
-            bg="lightgrey",
-            font=("Arial", 11, "bold")
-        ).place(relx=0.01, rely=0.68)
-
-        self.cond_ruido_h = IntVar()
+ 
+        # Campos Neural
+        self.t_lr = Label(self.frame_tela_simu, text="Learn Rate:",
+                          bg="lightgrey", font=("Arial", 12, "bold"))
+        self.lr = Entry(self.frame_tela_simu, font=("Arial", 12))
+        self.lr.insert(0, "0.01")
+ 
+        # ── Ruído (sensor) ────────────────────────────────────────────
+        Label(self.frame_tela_simu, text="Ruído (sensor):",
+              bg="lightgrey", font=("Arial", 11, "bold")).place(relx=0.01, rely=0.74)
+ 
+        self.cond_ruido_h  = IntVar()
         self.cond_ruido_Qe = IntVar()
-
-        Checkbutton(
-            self.frame_tela_simu,
-            text="Nível (h)",
-            variable=self.cond_ruido_h,
-            bg="lightgrey",
-            font=("Arial", 11)
-        ).place(relx=0.01, rely=0.74)
-
-        Checkbutton(
-            self.frame_tela_simu,
-            text="Vazão (Qe)",
-            variable=self.cond_ruido_Qe,
-            bg="lightgrey",
-            font=("Arial", 11)
-        ).place(relx=0.14, rely=0.74)
-
-        # ── Filtro EMA ──────────────────────────────────────────────
-
-        Label(
-            self.frame_tela_simu,
-            text="Filtro EMA:",
-            bg="lightgrey",
-            font=("Arial", 11, "bold")
-        ).place(relx=0.01, rely=0.82)
-
-        self.cond_filtro_h = IntVar()
+ 
+        Checkbutton(self.frame_tela_simu, text="Nível (h)",
+                    variable=self.cond_ruido_h, bg="lightgrey",
+                    font=("Arial", 11)).place(relx=0.01, rely=0.78)
+ 
+        Checkbutton(self.frame_tela_simu, text="Vazão (Qe)",
+                    variable=self.cond_ruido_Qe, bg="lightgrey",
+                    font=("Arial", 11)).place(relx=0.14, rely=0.78)
+ 
+        # ── Filtro EMA ────────────────────────────────────────────────
+        Label(self.frame_tela_simu, text="Filtro EMA:",
+              bg="lightgrey", font=("Arial", 11, "bold")).place(relx=0.01, rely=0.86)
+ 
+        self.cond_filtro_h  = IntVar()
         self.cond_filtro_Qe = IntVar()
-
-        Checkbutton(
-            self.frame_tela_simu,
-            text="Nível (h)",
-            variable=self.cond_filtro_h,
-            bg="lightgrey",
-            font=("Arial", 11),
-            command=self.atualizar_filtro
-        ).place(relx=0.01, rely=0.88)
-
-        Checkbutton(
-            self.frame_tela_simu,
-            text="Vazão (Qe)",
-            variable=self.cond_filtro_Qe,
-            bg="lightgrey",
-            font=("Arial", 11),
-            command=self.atualizar_filtro
-        ).place(relx=0.14, rely=0.88)
-
+ 
+        Checkbutton(self.frame_tela_simu, text="Nível (h)",
+                    variable=self.cond_filtro_h, bg="lightgrey",
+                    font=("Arial", 11),
+                    command=self.atualizar_filtro).place(relx=0.01, rely=0.9)
+ 
+        Checkbutton(self.frame_tela_simu, text="Vazão (Qe)",
+                    variable=self.cond_filtro_Qe, bg="lightgrey",
+                    font=("Arial", 11),
+                    command=self.atualizar_filtro).place(relx=0.14, rely=0.9)
+ 
         # Campos alpha
-        self.t_alpha_h = Label(
-            self.frame_tela_simu,
-            text="α h:",
-            bg="lightgrey",
-            font=("Arial", 11)
-        )
-
-        self.alpha_h = Entry(
-            self.frame_tela_simu,
-            font=("Arial", 11)
-        )
-
-        self.t_alpha_Qe = Label(
-            self.frame_tela_simu,
-            text="α Qe:",
-            bg="lightgrey",
-            font=("Arial", 11)
-        )
-
-        self.alpha_Qe = Entry(
-            self.frame_tela_simu,
-            font=("Arial", 11)
-        )
-
+        self.t_alpha_h = Label(self.frame_tela_simu, text="α h:",
+                               bg="lightgrey", font=("Arial", 11))
+        self.alpha_h = Entry(self.frame_tela_simu, font=("Arial", 11))
+        self.t_alpha_Qe = Label(self.frame_tela_simu, text="α Qe:",
+                                bg="lightgrey", font=("Arial", 11))
+        self.alpha_Qe = Entry(self.frame_tela_simu, font=("Arial", 11))
         self.alpha_h.insert(0, "0.3")
         self.alpha_Qe.insert(0, "0.3")
 
@@ -764,7 +692,8 @@ class Funcs():
         for w in (self.t_histerese, self.histerese,
                   self.t_Kp, self.Kp,
                   self.t_Ki, self.Ki,
-                  self.t_Kd, self.Kd):
+                  self.t_Kd, self.Kd,
+                  self.t_lr, self.lr):
             w.place_forget()
 
         if tipo == "ON/OFF":
@@ -779,13 +708,19 @@ class Funcs():
             self.t_Kd.place(relx=0.18, rely=0.62)
             self.Kd.place(relx=0.23, rely=0.62, width=80, height=26)
 
+        elif tipo == "Neural":
+            self.t_lr.place(relx=0.18, rely=0.68)
+            self.lr.place(relx=0.30, rely=0.68, width=80, height=26)
+
         # Repassa modo ao Control se já estiver rodando
         if hasattr(self, 'ctrl') and self.ctrl and self.ctrl.is_running:
             mapa = {
-                "Nenhum":        "none",
-                "ON/OFF":        "onoff",
-                "PID":           "pid",
-                "PID Adaptativo":"pid_adaptive",
+                "Nenhum":         "none",
+                "ON/OFF":         "onoff",
+                "PID":            "pid",
+                "PID Adaptativo": "pid_adaptive",
+                "Fuzzy":          "fuzzy",
+                "Neural":         "neural",
             }
             self.ctrl.set_mode(mapa[tipo])
 
