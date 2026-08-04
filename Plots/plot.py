@@ -14,6 +14,7 @@ from PyQt5.QtCore import QTimer
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from controle import Controle
+from RNA import NeuroController
 from plant import Plant
 from core import Core
 
@@ -228,7 +229,7 @@ class Plot(QWidget):
 
     def set_setpoint(self, novo_setpoint, ajustar_escala=True):
         
-        # Atualiza o setpoint em tempo real, sem reiniciar a simulação
+        # Atualiza o setpoint em tempo real, SEM reiniciar a simulação
         # Pode ser chamado a qualquer momento, de fora da classe
         
         self.setpoint = novo_setpoint
@@ -247,7 +248,7 @@ class Plot(QWidget):
             self.ax.set_ylim(-1.5, 2.5)
 
     def set_controller(self, novo_controle_obj):
-        # Troca o controlador ativo em tempo real, sem reiniciar a simulação
+        # Troca o controlador ativo em tempo real, SEM reiniciar a simulação
         self.controle_obj = novo_controle_obj
 
     def set_noise(self, novo_noise):
@@ -270,6 +271,17 @@ class Plot(QWidget):
         elif hasattr(self.controle_obj, 'tuning'):
             # Se possuir a tag 'tuning', roda o Autotune por Relé
             self.controle_signal = self.controle_obj.pid_autotune(self.setpoint, self.planta_signal)
+
+        elif hasattr(self.controle_obj, 'forward'):
+            # Controlador por Rede Neural
+            self.controle_signal = self.controle_obj.forward(self.erro_signal)
+
+            if hasattr(self.controle_obj, 'backpropagation'):
+                self.controle_obj.backpropagation(
+                    erro_sistema=self.erro_signal,
+                    dy_du=1.0,
+                    learn_ratio=0.01
+                )
 
         else:
             # Caso contrário, assume o PID ZOH tradicional
